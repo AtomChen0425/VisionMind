@@ -3,3 +3,4 @@ torch
 open-clip-torch
 Pillow
 numpy
+pyexiftool
