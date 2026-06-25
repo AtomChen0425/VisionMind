@@ -14,6 +14,8 @@ from .supported_image_types import METADATA_SUPPORTED_IMAGE_EXTENSIONS
 
 
 class ExifToolTagWriter:
+    WRITE_PARAMS = ["-overwrite_original", "-P", "-m", "-charset", "filename=UTF8", "-charset", "exif=UTF8"]
+
     def __init__(
         self,
         tool_dir: str | Path = "data/tools/exiftool",
@@ -42,38 +44,35 @@ class ExifToolTagWriter:
             return self.exiftool_path
         return self.manager.ensure_exiftool()
 
+    @staticmethod
+    def _build_tag_payload(tags: list[str], title: str | None) -> dict[str, str | list[str]]:
+        payload: dict[str, str | list[str]] = {
+            "XMP-dc:Subject": tags,
+            "IPTC:Keywords": tags,
+            "Keywords": tags,
+        }
+        if title:
+            payload["XMP-dc:Title"] = title
+            payload["EXIF:ImageDescription"] = title
+            payload["IPTC:Caption-Abstract"] = title
+        return payload
+
     def write(self, image_path: str | Path, tags: Sequence[str], title: str | None = None) -> Path:
         image_path = Path(image_path)
         if image_path.suffix.lower() not in METADATA_SUPPORTED_IMAGE_EXTENSIONS:
             raise ValueError(f"Unsupported image type for metadata writing: {image_path.suffix}")
 
         tags = self._unique_tags(tags)
-        current_metadata = read_image_metadata(image_path)
-        current_tags = self._unique_tags(extract_keywords(current_metadata))
-        current_title = extract_title(current_metadata)
-        resolved_title = title if title is not None else current_title
-
+        current = read_image_metadata(image_path)
+        current_tags = self._unique_tags(extract_keywords(current))
+        current_title = extract_title(current)
+        resolved_title = title.strip() if title and title.strip() else current_title
         if current_tags == tags and resolved_title == current_title:
             return image_path
 
         if ExifToolHelper is None:
             raise RuntimeError("pyexiftool is not installed")
 
-        tag_payload = {
-            "XMP-dc:Subject": tags,
-            "IPTC:Keywords": tags,
-            "Keywords": tags,
-        }
-        if resolved_title is not None and str(resolved_title).strip():
-            title_value = str(resolved_title).strip()
-            tag_payload["XMP-dc:Title"] = title_value
-            tag_payload["EXIF:ImageDescription"] = title_value
-            tag_payload["IPTC:Caption-Abstract"] = title_value
-
         with ExifToolHelper(executable=str(self._resolve_exiftool()), encoding="utf-8") as helper:
-            helper.set_tags(
-                [str(image_path)],
-                tag_payload,
-                params=["-overwrite_original", "-P", "-m", "-charset", "filename=UTF8", "-charset", "exif=UTF8"],
-            )
+            helper.set_tags([str(image_path)], self._build_tag_payload(tags, resolved_title), params=self.WRITE_PARAMS)
         return image_path
