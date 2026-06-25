@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import sys
 
-from PySide6.QtCore import QModelIndex, QRegularExpression, QSettings, Qt, QSortFilterProxyModel, QSize
-from PySide6.QtGui import QColor, QPalette, QPixmap
+from PySide6.QtCore import QModelIndex, QMimeData, QProcess, QRegularExpression, QSettings, Qt, QSortFilterProxyModel, QSize, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QMenu,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -317,6 +319,8 @@ class MainWindow(QMainWindow):
         self.view.setUniformItemSizes(True)
         self.view.setWordWrap(True)
         self.view.setSelectionMode(QListView.SingleSelection)
+        self.view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self._show_gallery_context_menu)
         center_layout.addWidget(self.view)
 
         right_panel = DetailsPanel()
@@ -458,6 +462,68 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str):
         self.status_label.setText(text)
+
+    def _selected_gallery_index(self, view_index: QModelIndex | None = None):
+        if view_index is not None and view_index.isValid():
+            return view_index
+        if not hasattr(self, "proxy_model") or self.proxy_model is None:
+            return QModelIndex()
+        return self.view.currentIndex()
+
+    def _selected_gallery_item(self, view_index: QModelIndex | None = None):
+        index = self._selected_gallery_index(view_index)
+        if not index.isValid():
+            return None
+        source_index = self.proxy_model.mapToSource(index)
+        return self.gallery_model.item(source_index.row())
+
+    def _show_gallery_context_menu(self, position):
+        if not hasattr(self, "proxy_model") or not hasattr(self, "gallery_model"):
+            return
+        view_index = self.view.indexAt(position)
+        if not view_index.isValid():
+            return
+        self.view.setCurrentIndex(view_index)
+        item = self._selected_gallery_item(view_index)
+        if item is None:
+            return
+
+        menu = QMenu(self)
+        open_action = menu.addAction("Open")
+        reveal_action = menu.addAction("Show in Folder")
+        copy_file_action = menu.addAction("Copy File")
+        copy_path_action = menu.addAction("Copy Path")
+        chosen = menu.exec(self.view.viewport().mapToGlobal(position))
+        if chosen == open_action:
+            self._open_file(item.file_path)
+        elif chosen == reveal_action:
+            self._show_in_folder(item.file_path)
+        elif chosen == copy_file_action:
+            self._copy_file_to_clipboard(item.file_path)
+        elif chosen == copy_path_action:
+            self._copy_path_to_clipboard(item.file_path)
+
+    def _open_file(self, file_path: str):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+
+    def _show_in_folder(self, file_path: str):
+        path = Path(file_path)
+        if sys.platform.startswith("win"):
+            QProcess.startDetached("explorer.exe", [f"/select,{str(path)}"])
+            return
+        if sys.platform == "darwin":
+            QProcess.startDetached("open", ["-R", str(path)])
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
+
+    def _copy_file_to_clipboard(self, file_path: str):
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(file_path)])
+        mime.setText(file_path)
+        QApplication.clipboard().setMimeData(mime)
+
+    def _copy_path_to_clipboard(self, file_path: str):
+        QApplication.clipboard().setText(file_path)
 
     def _update_library_action_state(self):
         has_library = self.library_id is not None
