@@ -44,11 +44,16 @@ class AutoLibraryController(QObject):
     def refresh_libraries(self):
         libraries = self.db.list_libraries()
         self.libraries_changed.emit(libraries)
-        if self._active_library_id is None and libraries:
-            first = libraries[0]
-            self._active_library_id = int(first["id"])
-            self._active_root_path = str(first["root_path"])
-            self.active_library_changed.emit(self._active_library_id, self._active_root_path)
+        library_ids = {int(row["id"]) for row in libraries}
+        if self._active_library_id not in library_ids:
+            if libraries:
+                first = libraries[0]
+                self._active_library_id = int(first["id"])
+                self._active_root_path = str(first["root_path"])
+                self.active_library_changed.emit(self._active_library_id, self._active_root_path)
+            else:
+                self._active_library_id = None
+                self._active_root_path = ""
         self._scan_queue = [int(row["id"]) for row in libraries]
         if not self.timer.isActive() and libraries:
             self.timer.start()
@@ -60,8 +65,13 @@ class AutoLibraryController(QObject):
         return library_id
 
     def remove_library(self, library_id: int):
+        if self.scan_running or self.analysis_running:
+            raise RuntimeError("Cannot delete a library while scan or analysis is running")
         with self.db.get_connection() as conn:
             conn.execute("DELETE FROM libraries WHERE id = ?", (library_id,))
+        if self._active_library_id == library_id:
+            self._active_library_id = None
+            self._active_root_path = ""
         self.refresh_libraries()
 
     def set_active_library(self, library_id: int):
@@ -113,8 +123,23 @@ class AutoLibraryController(QObject):
             self.refresh_libraries()
             return
 
+        self._start_scan_for_library(library_id, str(library["root_path"]))
+
+    def scan_library(self, library_id: int):
+        if self.scan_running or self.analysis_running:
+            return
+        library = None
+        for row in self.db.list_libraries():
+            if int(row["id"]) == int(library_id):
+                library = row
+                break
+        if library is None:
+            self.refresh_libraries()
+            return
+        self._start_scan_for_library(library_id, str(library["root_path"]))
+
+    def _start_scan_for_library(self, library_id: int, root_path: str):
         self.scan_running = True
-        root_path = str(library["root_path"])
         excludes = [str(row["path"]) for row in self.db.get_library_excludes(library_id)]
         self.scan_started.emit(library_id, root_path)
         self.message.emit(f"Watching {root_path} for changes...")

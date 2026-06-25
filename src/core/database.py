@@ -360,7 +360,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             existing = conn.execute(
                 """
-                SELECT id, file_hash, mtime, mtime_ns, size, status, relative_path, library_id
+                SELECT id, file_hash, mtime, mtime_ns, size, status, relative_path, library_id, deleted_at
                 FROM files
                 WHERE file_path = ?
                 """,

@@ -87,6 +87,33 @@ class DatabaseManagerTests(unittest.TestCase):
 
         self.assertEqual(foreign_keys, 1)
 
+    def test_deleting_library_cascades_related_rows(self):
+        db = DatabaseManager(":memory:")
+        library_id = self._create_library(db, "/library")
+        with db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO files (library_id, file_path, relative_path, file_hash, mtime, mtime_ns, size, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (library_id, "/tmp/photo.jpg", "photo.jpg", "hash", 1.0, 1, 10, "pending"),
+            )
+            file_id = conn.execute("SELECT id FROM files WHERE file_path = ?", ("/tmp/photo.jpg",)).fetchone()[0]
+            conn.execute(
+                "INSERT INTO tags (file_id, tag_name, confidence, source, model_name) VALUES (?, ?, ?, ?, ?)",
+                (file_id, "portrait", 0.9, "open_clip", "model"),
+            )
+
+        with db.get_connection() as conn:
+            conn.execute("DELETE FROM libraries WHERE id = ?", (library_id,))
+
+        with db.get_connection() as conn:
+            file_count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+            tag_count = conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
+
+        self.assertEqual(file_count, 0)
+        self.assertEqual(tag_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

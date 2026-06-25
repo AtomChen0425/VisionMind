@@ -39,6 +39,10 @@ class ExifToolTagWriter:
             result.append(cleaned)
         return result
 
+    @staticmethod
+    def _merge_tags(existing_tags: Sequence[str], new_tags: Sequence[str]) -> list[str]:
+        return ExifToolTagWriter._unique_tags([*existing_tags, *new_tags])
+
     def _resolve_exiftool(self) -> Path:
         if self.exiftool_path is not None and self.exiftool_path.exists():
             return self.exiftool_path
@@ -62,17 +66,17 @@ class ExifToolTagWriter:
         if image_path.suffix.lower() not in METADATA_SUPPORTED_IMAGE_EXTENSIONS:
             raise ValueError(f"Unsupported image type for metadata writing: {image_path.suffix}")
 
-        tags = self._unique_tags(tags)
         current = read_image_metadata(image_path)
         current_tags = self._unique_tags(extract_keywords(current))
         current_title = extract_title(current)
         resolved_title = title.strip() if title and title.strip() else current_title
-        if current_tags == tags and resolved_title == current_title:
+        merged_tags = self._merge_tags(current_tags, tags)
+        if merged_tags == current_tags and resolved_title == current_title:
             return image_path
 
         if ExifToolHelper is None:
             raise RuntimeError("pyexiftool is not installed")
 
         with ExifToolHelper(executable=str(self._resolve_exiftool()), encoding="utf-8") as helper:
-            helper.set_tags([str(image_path)], self._build_tag_payload(tags, resolved_title), params=self.WRITE_PARAMS)
+            helper.set_tags([str(image_path)], self._build_tag_payload(merged_tags, resolved_title), params=self.WRITE_PARAMS)
         return image_path

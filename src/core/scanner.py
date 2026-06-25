@@ -135,16 +135,27 @@ class Scanner:
                 if compute_hash_for_changed_files and needs_hash:
                     file_hash = self._calculate_hash(normalized_file_path)
 
+                stored_hash = file_hash if file_hash is not None else (existing["file_hash"] if existing is not None else None)
+                metadata_changed = (
+                    existing is None
+                    or existing["file_hash"] != stored_hash
+                    or int(existing["mtime_ns"]) != int(stat_result.st_mtime_ns)
+                    or int(existing["size"]) != int(stat_result.st_size)
+                    or existing["relative_path"] != relative_path
+                    or int(existing["library_id"]) != int(library_id)
+                ) if existing is not None else True
+                status_to_set = "pending" if existing is None or metadata_changed or str(existing["status"]) == "error" or existing["deleted_at"] is not None else str(existing["status"])
+
                 try:
                     file_id, changed = self.db.upsert_file_record(
                         library_id=library_id,
                         file_path=normalized_file_path,
                         relative_path=relative_path,
-                        file_hash=file_hash if file_hash is not None else (existing["file_hash"] if existing is not None else None),
+                        file_hash=stored_hash,
                         mtime=stat_result.st_mtime,
                         mtime_ns=stat_result.st_mtime_ns,
                         size=stat_result.st_size,
-                        status="pending",
+                        status=status_to_set,
                         last_scan_run_id=scan_run_id,
                     )
                 except OSError:

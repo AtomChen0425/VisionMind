@@ -277,6 +277,14 @@ class MainWindow(QMainWindow):
         self.save_excludes_btn.clicked.connect(self._save_excludes)
         self.save_excludes_btn.setObjectName("SecondaryButton")
 
+        self.scan_now_btn = QPushButton("Scan Now")
+        self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
+        self.scan_now_btn.setObjectName("SecondaryButton")
+
+        self.delete_library_btn = QPushButton("Delete Library")
+        self.delete_library_btn.clicked.connect(self._delete_current_library)
+        self.delete_library_btn.setObjectName("SecondaryButton")
+
         left_layout.addWidget(QLabel("Libraries"))
         left_layout.addWidget(self.library_list, 1)
         left_layout.addWidget(QLabel("Current Library"))
@@ -288,6 +296,10 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(QLabel("Exclude Paths"))
         left_layout.addWidget(self.excludes_box)
         left_layout.addWidget(self.save_excludes_btn)
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.scan_now_btn)
+        action_row.addWidget(self.delete_library_btn)
+        left_layout.addLayout(action_row)
 
         center_panel = QFrame()
         center_panel.setObjectName("CenterPanel")
@@ -326,8 +338,10 @@ class MainWindow(QMainWindow):
         self.controller.libraries_changed.connect(self._on_libraries_changed)
         self.controller.active_library_changed.connect(self._on_active_library_changed)
         self.controller.scan_started.connect(lambda library_id, root_path: self._set_status(f"Scanning {root_path} in the background..."))
+        self.controller.scan_started.connect(lambda *_: self._update_library_action_state())
         self.controller.scan_finished.connect(self._on_scan_finished)
         self.controller.analysis_started.connect(lambda library_id, root_path: self._set_status(f"Analyzing new and changed photos in {root_path}..."))
+        self.controller.analysis_started.connect(lambda *_: self._update_library_action_state())
         self.controller.analysis_finished.connect(self._on_analysis_finished)
         self.controller.message.connect(self._set_status)
 
@@ -445,6 +459,13 @@ class MainWindow(QMainWindow):
     def _set_status(self, text: str):
         self.status_label.setText(text)
 
+    def _update_library_action_state(self):
+        has_library = self.library_id is not None
+        busy = self.controller.scan_running or self.controller.analysis_running
+        self.scan_now_btn.setEnabled(has_library and not busy)
+        self.delete_library_btn.setEnabled(has_library and not busy)
+        self.save_excludes_btn.setEnabled(has_library and not busy)
+
     def _refresh_exiftool_status(self):
         writer = getattr(self.pipeline, "metadata_writer", None)
         exiftool_path = None
@@ -521,6 +542,7 @@ class MainWindow(QMainWindow):
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
             self._refresh_stats()
+            self._update_library_action_state()
             return
         library_id = int(item.data(Qt.UserRole))
         self.controller.set_active_library(library_id)
@@ -548,7 +570,23 @@ class MainWindow(QMainWindow):
                 if int(self.library_list.item(row_index).data(Qt.UserRole)) == current_id:
                     self.library_list.setCurrentRow(row_index)
                     break
+            else:
+                if self.library_list.count() == 0:
+                    self.library_id = None
+                    self.root_path = ""
+                    self.library_label.setText("No library selected")
+                    self.view.setModel(None)
+                    self.details_panel.set_item(None, [])
+                    self._refresh_stats()
         self._updating_library_list = False
+        if not libraries:
+            self.library_id = None
+            self.root_path = ""
+            self.library_label.setText("No library selected")
+            self.view.setModel(None)
+            self.details_panel.set_item(None, [])
+            self._refresh_stats()
+        self._update_library_action_state()
 
     def _on_active_library_changed(self, library_id: int, root_path: str):
         self.library_id = library_id
@@ -565,11 +603,13 @@ class MainWindow(QMainWindow):
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
         self._sync_library_excludes_box()
         self._refresh_stats()
+        self._update_library_action_state()
 
     def _on_scan_finished(self, summary):
         if hasattr(self, "gallery_model") and self.library_id is not None:
             self.gallery_model.refresh(self.library_id)
         self._refresh_stats()
+        self._update_library_action_state()
         self._set_status(
             f"Scan complete: {summary.root_path} | {summary.files_seen} seen, {summary.files_added + summary.files_updated} changed, {summary.files_deleted} deleted"
         )
@@ -579,6 +619,7 @@ class MainWindow(QMainWindow):
             self.gallery_model.refresh(self.library_id)
         self._refresh_stats()
         self._refresh_exiftool_status()
+        self._update_library_action_state()
         self._set_status(f"Analysis complete: {len(outcomes)} files processed")
 
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex):
@@ -599,6 +640,33 @@ class MainWindow(QMainWindow):
         paths = [line.strip() for line in self.excludes_box.toPlainText().splitlines() if line.strip()]
         self.controller.set_library_excludes(self.library_id, paths)
         self._set_status("Exclude paths saved")
+
+    def _manual_scan_current_library(self):
+        if self.library_id is None:
+            return
+        self.controller.scan_library(self.library_id)
+        self._update_library_action_state()
+        self._set_status("Manual scan started")
+
+    def _delete_current_library(self):
+        if self.library_id is None:
+            return
+        response = QMessageBox.question(
+            self,
+            "Delete Library",
+            f"Delete the selected library?\n\n{self.root_path}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if response != QMessageBox.Yes:
+            return
+        try:
+            self.controller.remove_library(self.library_id)
+        except Exception as exc:
+            QMessageBox.critical(self, "Delete Library Failed", str(exc))
+            return
+        self._set_status("Library deleted")
+        self._update_library_action_state()
 
     def closeEvent(self, event):
         self.controller.stop()

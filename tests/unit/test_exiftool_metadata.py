@@ -39,14 +39,18 @@ class ExifToolMetadataWriterTests(unittest.TestCase):
 
             with mock.patch.object(exiftool_metadata, "ExifToolHelper", FakeHelper):
                 writer = ExifToolTagWriter(tool_dir=tmp_dir, exiftool_path=tool_path)
-                output_path = writer.write(image_path, ["Portrait", "Night", "portrait"], title="Sunset")
+                with mock.patch(
+                    "src.core.exiftool_metadata.read_image_metadata",
+                    return_value={"Subject": "Existing; Portrait", "ImageDescription": "Sunset"},
+                ):
+                    output_path = writer.write(image_path, ["Portrait", "Night", "portrait"], title="Sunset")
 
             self.assertEqual(output_path, image_path)
             self.assertEqual(len(commands), 1)
             command = commands[0]
             self.assertEqual(command[0], str(image_path))
-            self.assertEqual(command[1]["XMP-dc:Subject"], ["Portrait", "Night"])
-            self.assertEqual(command[1]["IPTC:Keywords"], ["Portrait", "Night"])
+            self.assertEqual(command[1]["XMP-dc:Subject"], ["Existing", "Portrait", "Night"])
+            self.assertEqual(command[1]["IPTC:Keywords"], ["Existing", "Portrait", "Night"])
             self.assertEqual(command[1]["XMP-dc:Title"], "Sunset")
             self.assertEqual(command[1]["EXIF:ImageDescription"], "Sunset")
             self.assertEqual(command[1]["IPTC:Caption-Abstract"], "Sunset")
@@ -75,7 +79,10 @@ class ExifToolMetadataWriterTests(unittest.TestCase):
 
             with mock.patch.object(exiftool_metadata, "ExifToolHelper", FakeHelper):
                 writer = ExifToolTagWriter(tool_dir=tmp_dir, exiftool_path=tool_path)
-                with mock.patch("src.core.exiftool_metadata.read_image_metadata", return_value={}):
+                with mock.patch(
+                    "src.core.exiftool_metadata.read_image_metadata",
+                    return_value={"Subject": "Portrait; Night", "ImageDescription": "Sunset"},
+                ):
                     with mock.patch("src.core.exiftool_metadata.extract_keywords", return_value=["Portrait", "Night"]):
                         with mock.patch("src.core.exiftool_metadata.extract_title", return_value="Sunset"):
                             output_path = writer.write(image_path, ["Portrait", "Night", "portrait"], title="Sunset")

@@ -47,6 +47,23 @@ class TestScanner(unittest.TestCase):
         self.assertEqual(summary.files_added, 1)
         self.assertEqual(self.db.count_photos(), 1)
 
+    def test_scan_keeps_analyzed_files_out_of_pending(self):
+        image_path = Path(self.test_dir) / "photo.jpg"
+        image_path.write_bytes(b"fake-image-data")
+
+        first_summary = self.scanner.scan(self.test_dir)
+        file_row = self.db.get_file_by_path(str(image_path.resolve()))
+        self.db.set_file_analyzed(int(file_row["id"]))
+
+        second_summary = self.scanner.scan(self.test_dir)
+        file_row_after = self.db.get_file_by_path(str(image_path.resolve()))
+        pending_rows = self.db.list_pending_files(1)
+
+        self.assertEqual(first_summary.files_added, 1)
+        self.assertEqual(second_summary.files_unchanged, 1)
+        self.assertEqual(str(file_row_after["status"]), "analyzed")
+        self.assertEqual(len(pending_rows), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
