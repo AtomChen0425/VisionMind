@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, QThread, Signal, Slot, QSize
 from PySide6.QtGui import QImage, QPixmap, QColor, QPainter, QLinearGradient, QBrush, QFont
+from collections import OrderedDict
 
 from src.core.database import DatabaseManager
 from src.core.image_processing import save_thumbnail_png
@@ -74,7 +75,9 @@ class GalleryModel(QAbstractListModel):
         self._total_count = 0
         self._items: list[GalleryItem] = []
         self._thumb_requests: set[int] = set()
-        self._thumb_cache: dict[int, QPixmap] = {}
+        # self._thumb_cache: dict[int, QPixmap] = {}
+        self._thumb_cache: OrderedDict[int, QPixmap] = OrderedDict()
+        self.MAX_CACHE_SIZE = 100 
         self._disk_cache = ThumbnailCache()
         self._placeholder = self._build_placeholder()
 
@@ -242,6 +245,10 @@ class GalleryModel(QAbstractListModel):
     def _on_thumbnail_ready(self, file_id: int, image: QImage):
         pixmap = QPixmap.fromImage(image)
         self._thumb_cache[file_id] = pixmap
+        self._thumb_cache.move_to_end(file_id)
+        if len(self._thumb_cache) > self.MAX_CACHE_SIZE:
+            self._thumb_cache.popitem(last=False) # remove oldest
+            
         self._thumb_requests.discard(file_id)
         for row, item in enumerate(self._items):
             if item.file_id == file_id:
