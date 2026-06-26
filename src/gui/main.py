@@ -142,7 +142,10 @@ class DetailsPanel(QFrame):
         self.preview.set_source_pixmap(pixmap)
         self.path.setText(item.file_path)
         self.relative_path.setText(item.relative_path)
-        self.status.setText(item.status)
+        if item.status == "error" and item.last_error:
+            self.status.setText(f"error: {item.last_error}")
+        else:
+            self.status.setText(item.status)
         self.metadata_state.setText(item.xmp_state)
         if tags:
             text = "\n".join(f"{row['tag_name']}  ({row['confidence']:.2f})" for row in tags)

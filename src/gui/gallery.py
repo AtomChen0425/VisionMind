@@ -22,6 +22,7 @@ class GalleryItem:
     mtime_ns: int
     score: float | None = None
     last_analyzed_at: str | None = None
+    last_error: str | None = None
     xmp_state: str = "not_written"
     deleted_at: str | None = None
     thumbnail: QPixmap | None = None
@@ -63,7 +64,8 @@ class GalleryModel(QAbstractListModel):
     StatusRole = Qt.UserRole + 4
     SizeRole = Qt.UserRole + 5
     LastAnalyzedRole = Qt.UserRole + 6
-    XmpStateRole = Qt.UserRole + 7
+    LastErrorRole = Qt.UserRole + 7
+    XmpStateRole = Qt.UserRole + 8
 
     request_thumbnail = Signal(int, str, object, object)
 
@@ -110,10 +112,6 @@ class GalleryModel(QAbstractListModel):
         return pixmap
 
     def _decorated_thumbnail(self, item: GalleryItem) -> QPixmap:
-        '''
-        show the status of the analysis
-        '''
-        
         base = item.thumbnail or self._placeholder
         pixmap = QPixmap(base)
         painter = QPainter(pixmap)
@@ -124,13 +122,18 @@ class GalleryModel(QAbstractListModel):
         x = pixmap.width() - badge_size - badge_margin
         y = pixmap.height() - badge_size - badge_margin
 
-        analyzed = item.status == "analyzed"
-        if analyzed:
+        if item.status == "analyzed":
             fill = QColor("#2f7d68")
             stroke = QColor("#e8f4ef")
+            symbol = "check"
+        elif item.status == "error":
+            fill = QColor("#b42318")
+            stroke = QColor("#fff1f0")
+            symbol = "error"
         else:
             fill = QColor("#b7791f")
             stroke = QColor("#fff4db")
+            symbol = "pending"
 
         painter.setPen(Qt.NoPen)
         painter.setBrush(fill)
@@ -142,9 +145,12 @@ class GalleryModel(QAbstractListModel):
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
 
-        if analyzed:
+        if symbol == "check":
             painter.drawLine(x + 9, y + 18, x + 15, y + 24)
             painter.drawLine(x + 15, y + 24, x + 25, y + 11)
+        elif symbol == "error":
+            painter.drawLine(x + 17, y + 8, x + 17, y + 20)
+            painter.drawPoint(x + 17, y + 25)
         else:
             center_x = x + badge_size // 2
             center_y = y + badge_size // 2
@@ -163,6 +169,7 @@ class GalleryModel(QAbstractListModel):
             self.StatusRole: b"status",
             self.SizeRole: b"size",
             self.LastAnalyzedRole: b"lastAnalyzedAt",
+            self.LastErrorRole: b"lastError",
             self.XmpStateRole: b"xmpState",
         }
 
@@ -196,6 +203,7 @@ class GalleryModel(QAbstractListModel):
                     mtime_ns=int(row["mtime_ns"]),
                     score=score_map.get(file_id),
                     last_analyzed_at=row["last_analyzed_at"],
+                    last_error=row["last_error"],
                     xmp_state=str(row["xmp_state"] or "not_written"),
                     deleted_at=row["deleted_at"],
                     thumbnail=None,
@@ -228,6 +236,7 @@ class GalleryModel(QAbstractListModel):
                 size=int(row["size"]),
                 mtime_ns=int(row["mtime_ns"]),
                 last_analyzed_at=row["last_analyzed_at"],
+                last_error=row["last_error"],
                 xmp_state=str(row["xmp_state"] or "not_written"),
                 deleted_at=row["deleted_at"],
                 thumbnail=self._thumb_cache.get(int(row["id"])),
@@ -268,10 +277,14 @@ class GalleryModel(QAbstractListModel):
             return item.size
         if role == self.LastAnalyzedRole:
             return item.last_analyzed_at
+        if role == self.LastErrorRole:
+            return item.last_error
         if role == self.XmpStateRole:
             return item.xmp_state
         if role == Qt.ToolTipRole:
             base = f"{item.relative_path}\n{item.status}\n{item.file_path}"
+            if item.last_error:
+                base += f"\nerror: {item.last_error}"
             if item.score is not None:
                 base += f"\nscore: {item.score:.3f}"
             return base

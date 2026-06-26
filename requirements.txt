@@ -3,5 +3,6 @@ torch
 open-clip-torch
 Pillow
 numpy
+rawpy
 pyexiftool
 faiss-cpu

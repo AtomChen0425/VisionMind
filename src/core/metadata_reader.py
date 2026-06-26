@@ -9,6 +9,8 @@ from typing import Any
 
 from PIL import ExifTags, Image
 
+from .image_processing import load_image_for_processing
+
 
 def _parse_iso8601(value: str) -> datetime:
     cleaned = value.strip()
@@ -150,8 +152,8 @@ def get_img_xmp(image: Image.Image) -> dict[str, Any]:
 
 def get_img_exif(image: Image.Image) -> dict[str, Any]:
     img_exif = image.getexif()
-    if not img_exif:
-        return get_img_xmp(image)
+    # if not img_exif:
+    #     return get_img_xmp(image)
 
     result_dict: dict[str, Any] = defaultdict(str)
     for key, val in img_exif.items():
@@ -159,18 +161,16 @@ def get_img_exif(image: Image.Image) -> dict[str, Any]:
         if tag_name:
             result_dict[tag_name] = val
 
-    xmp_data = get_img_xmp(image)
-    for key, value in xmp_data.items():
-        result_dict.setdefault(key, value)
+    # xmp_data = get_img_xmp(image)
+    # for key, value in xmp_data.items():
+    #     result_dict.setdefault(key, value)
 
     return dict(result_dict)
 
 
 def read_image_metadata(image_path: str | Path) -> dict[str, Any]:
-    with Image.open(image_path) as image:
-        return get_img_exif(image)
-if __name__ == "__main__":
-    print('start')
-    image_path=r"F:\相片\20251020湖边\枫叶和塔\DSC_7422_1.jpg"
-    exif_info=read_image_metadata(image_path)
-    print(exif_info)
+    try:
+        image = load_image_for_processing(image_path)
+    except Exception:
+        return {}
+    return get_img_exif(image)

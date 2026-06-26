@@ -6,6 +6,8 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
+from .image_processing import load_image_for_processing
+
 
 DEFAULT_LABELS = (
     "person",
@@ -128,12 +130,10 @@ class OpenClipAnalyzer:
         if not image_paths:
             return []
 
-        from PIL import Image
-
         image_tensors = []
         for image_path in image_paths:
-            with Image.open(image_path) as image:
-                image_tensors.append(self._preprocess(image.convert("RGB")))
+            image = load_image_for_processing(image_path)
+            image_tensors.append(self._preprocess(image.convert("RGB")))
         image_tensor = self._torch.stack(image_tensors, dim=0).to(self._device)
         label_tokens = self._tokenizer(list(labels)).to(self._device)
 
