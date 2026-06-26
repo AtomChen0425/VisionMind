@@ -94,13 +94,13 @@ class GalleryModel(QAbstractListModel):
 
     def _build_placeholder(self) -> QPixmap:
         pixmap = QPixmap(320, 320)
-        pixmap.fill(QColor("#1f2937"))
+        pixmap.fill(QColor("#e8dfd2"))
         painter = QPainter(pixmap)
         gradient = QLinearGradient(0, 0, 320, 320)
-        gradient.setColorAt(0.0, QColor("#334155"))
-        gradient.setColorAt(1.0, QColor("#111827"))
+        gradient.setColorAt(0.0, QColor("#f4eadb"))
+        gradient.setColorAt(1.0, QColor("#cfe2d9"))
         painter.fillRect(0, 0, 320, 320, QBrush(gradient))
-        painter.setPen(QColor("#94a3b8"))
+        painter.setPen(QColor("#716658"))
         painter.setFont(QFont("Segoe UI", 10))
         painter.drawText(pixmap.rect(), Qt.AlignCenter, "Loading")
         painter.end()
