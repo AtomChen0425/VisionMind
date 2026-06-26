@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, QThread, Signal, Slot, QSize
-from PySide6.QtGui import QImage, QPixmap, QColor, QPainter, QLinearGradient, QBrush, QFont
+from PySide6.QtGui import QImage, QPixmap, QColor, QPainter, QLinearGradient, QBrush, QFont, QPen
 from collections import OrderedDict
 
 from src.core.database import DatabaseManager
@@ -109,6 +109,52 @@ class GalleryModel(QAbstractListModel):
         painter.end()
         return pixmap
 
+    def _decorated_thumbnail(self, item: GalleryItem) -> QPixmap:
+        '''
+        show the status of the analysis
+        '''
+        
+        base = item.thumbnail or self._placeholder
+        pixmap = QPixmap(base)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        badge_size = 34
+        badge_margin = 10
+        x = pixmap.width() - badge_size - badge_margin
+        y = pixmap.height() - badge_size - badge_margin
+
+        analyzed = item.status == "analyzed"
+        if analyzed:
+            fill = QColor("#2f7d68")
+            stroke = QColor("#e8f4ef")
+        else:
+            fill = QColor("#b7791f")
+            stroke = QColor("#fff4db")
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill)
+        painter.drawEllipse(x, y, badge_size, badge_size)
+
+        pen = QPen(stroke, 2.5)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+
+        if analyzed:
+            painter.drawLine(x + 9, y + 18, x + 15, y + 24)
+            painter.drawLine(x + 15, y + 24, x + 25, y + 11)
+        else:
+            center_x = x + badge_size // 2
+            center_y = y + badge_size // 2
+            painter.drawEllipse(center_x - 7, center_y - 7, 14, 14)
+            painter.drawLine(center_x, center_y - 2, center_x, center_y - 7)
+            painter.drawLine(center_x, center_y, center_x + 4, center_y + 2)
+
+        painter.end()
+        return pixmap
+
     def roleNames(self):
         return {
             self.FileIdRole: b"fileId",
@@ -210,8 +256,8 @@ class GalleryModel(QAbstractListModel):
                 if item.file_id not in self._thumb_requests:
                     self._thumb_requests.add(item.file_id)
                     self.request_thumbnail.emit(item.file_id, item.file_path, item.mtime_ns, item.size)
-                return self._placeholder
-            return item.thumbnail
+                return self._decorated_thumbnail(item)
+            return self._decorated_thumbnail(item)
         if role == self.FileIdRole:
             return item.file_id
         if role == self.FilePathRole:
