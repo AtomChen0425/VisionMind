@@ -26,13 +26,13 @@ class FakePipeline:
         self.batches.append(list(file_items))
         return [
             ProcessingOutcome(
-                file_id=file_id,
-                image_path=image_path,
+                file_id=file_item[0],
+                image_path=file_item[1],
                 tags_written=1,
                 embedding_written=True,
                 metadata_written=True,
             )
-            for file_id, image_path in file_items
+            for file_item in file_items
         ]
 
     def process_file(self, file_id: int, image_path: str):
@@ -41,7 +41,10 @@ class FakePipeline:
 
 class AnalysisWorkerTests(unittest.TestCase):
     def test_run_processes_files_in_configured_batches(self):
-        rows = [{"id": index, "file_path": f"image-{index}.jpg"} for index in range(1, 6)]
+        rows = [
+            {"id": index, "file_path": f"image-{index}.jpg", "mtime_ns": index * 100, "size": index * 10}
+            for index in range(1, 6)
+        ]
         pipeline = FakePipeline()
         worker = AnalysisWorker(pipeline, rows, batch_size=2)
         progress = []
@@ -52,9 +55,9 @@ class AnalysisWorkerTests(unittest.TestCase):
         self.assertEqual(
             pipeline.batches,
             [
-                [(1, "image-1.jpg"), (2, "image-2.jpg")],
-                [(3, "image-3.jpg"), (4, "image-4.jpg")],
-                [(5, "image-5.jpg")],
+                [(1, "image-1.jpg", 100, 10), (2, "image-2.jpg", 200, 20)],
+                [(3, "image-3.jpg", 300, 30), (4, "image-4.jpg", 400, 40)],
+                [(5, "image-5.jpg", 500, 50)],
             ],
         )
         self.assertEqual([item[0] for item in progress], [1, 2, 3, 4, 5])

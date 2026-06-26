@@ -54,18 +54,21 @@ class AnalysisWorker(QObject):
             processed = 0
             for batch_start in range(0, total, self.batch_size):
                 batch_rows = self.file_rows[batch_start : batch_start + self.batch_size]
-                batch_items = [(int(row["id"]), str(row["file_path"])) for row in batch_rows]
+                batch_items = [
+                    (int(row["id"]), str(row["file_path"]), int(row["mtime_ns"]), int(row["size"]))
+                    for row in batch_rows
+                ]
                 try:
                     batch_outcomes = self.pipeline.process_files(batch_items)
                 except Exception as exc:
-                    for file_id, image_path in batch_items:
+                    for file_id, image_path, mtime_ns, size in batch_items:
                         try:
-                            outcomes.append(self.pipeline.process_file(file_id, image_path))
+                            outcomes.append(self.pipeline.process_file(file_id, image_path, mtime_ns=mtime_ns, size=size))
                         except Exception as item_exc:
                             self.pipeline.db.set_file_error(file_id, str(item_exc or exc))
                 else:
                     outcomes.extend(batch_outcomes)
-                for _file_id, image_path in batch_items:
+                for _file_id, image_path, _mtime_ns, _size in batch_items:
                     processed += 1
                     self.progress_changed.emit(processed, total, image_path)
             self.finished.emit(outcomes)

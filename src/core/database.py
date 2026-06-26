@@ -836,7 +836,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             return conn.execute(
                 """
-                SELECT id, file_path, relative_path, status, size, last_analyzed_at, xmp_state, deleted_at
+                SELECT id, file_path, relative_path, status, size, mtime_ns, last_analyzed_at, xmp_state, deleted_at
                 FROM files
                 WHERE library_id = ? AND deleted_at IS NULL AND status IN ('pending', 'error')
                 ORDER BY id ASC
