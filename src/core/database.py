@@ -145,6 +145,20 @@ class DatabaseManager:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS vector_indexes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    library_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    dimension INTEGER NOT NULL DEFAULT 0,
+                    index_path TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(library_id, model_name),
+                    FOREIGN KEY(library_id) REFERENCES libraries(id) ON DELETE CASCADE
+                )
+                """
+            )
             self._migrate_legacy_schema(conn)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_libraries_root_path ON libraries(root_path)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_files_library_path ON files(library_id, file_path)")
@@ -153,6 +167,7 @@ class DatabaseManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(tag_name)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model_name)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_library_excludes_library ON library_excludes(library_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_vector_indexes_library_model ON vector_indexes(library_id, model_name)")
 
     def _table_columns(self, conn: sqlite3.Connection, table_name: str) -> set[str]:
         rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
@@ -263,6 +278,21 @@ class DatabaseManager:
                 )
                 """
             )
+        if "vector_indexes" not in tables:
+            conn.execute(
+                """
+                CREATE TABLE vector_indexes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    library_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    dimension INTEGER NOT NULL DEFAULT 0,
+                    index_path TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(library_id, model_name),
+                    FOREIGN KEY(library_id) REFERENCES libraries(id) ON DELETE CASCADE
+                )
+                """
+            )
 
     def register_library(self, root_path: str) -> int:
         normalized_root = str(Path(root_path).resolve())
@@ -340,6 +370,18 @@ class DatabaseManager:
                 WHERE file_path = ?
                 """,
                 (normalized_path,),
+            ).fetchone()
+
+    def get_file_by_id(self, file_id: int):
+        with self.get_connection() as conn:
+            return conn.execute(
+                """
+                SELECT id, library_id, file_path, relative_path, file_hash, mtime, mtime_ns, size,
+                       status, deleted_at, last_analyzed_at, last_scan_run_id, last_error, xmp_state
+                FROM files
+                WHERE id = ?
+                """,
+                (file_id,),
             ).fetchone()
 
     def upsert_file_record(
@@ -693,6 +735,89 @@ class DatabaseManager:
                 """,
                 (library_id,),
             ).fetchall()
+
+    def list_files_by_ids(self, library_id: int, file_ids: Sequence[int]):
+        normalized_ids = [int(file_id) for file_id in file_ids]
+        if not normalized_ids:
+            return []
+        placeholders = ",".join("?" for _ in normalized_ids)
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, file_path, relative_path, status, size, mtime_ns, last_analyzed_at, xmp_state, deleted_at
+                FROM files
+                WHERE library_id = ? AND deleted_at IS NULL AND id IN ({placeholders})
+                """,
+                [library_id, *normalized_ids],
+            ).fetchall()
+        by_id = {int(row["id"]): row for row in rows}
+        return [by_id[file_id] for file_id in normalized_ids if file_id in by_id]
+
+    def search_files_by_name(self, library_id: int, query: str, limit: int = 50):
+        pattern = f"%{query.strip().lower()}%"
+        with self.get_connection() as conn:
+            return conn.execute(
+                """
+                SELECT id, file_path, relative_path, status, size, mtime_ns, last_analyzed_at, xmp_state, deleted_at
+                FROM files
+                WHERE library_id = ? AND deleted_at IS NULL
+                  AND (LOWER(relative_path) LIKE ? OR LOWER(file_path) LIKE ?)
+                ORDER BY relative_path ASC
+                LIMIT ?
+                """,
+                (library_id, pattern, pattern, limit),
+            ).fetchall()
+
+    def list_embeddings_for_library(self, library_id: int, model_name: str | None = None):
+        with self.get_connection() as conn:
+            if model_name is None:
+                return conn.execute(
+                    """
+                    SELECT e.file_id, e.model_name, e.dimensions, e.vector
+                    FROM embeddings e
+                    JOIN files f ON f.id = e.file_id
+                    WHERE f.library_id = ? AND f.deleted_at IS NULL
+                    """,
+                    (library_id,),
+                ).fetchall()
+            return conn.execute(
+                """
+                SELECT e.file_id, e.model_name, e.dimensions, e.vector
+                FROM embeddings e
+                JOIN files f ON f.id = e.file_id
+                WHERE f.library_id = ? AND f.deleted_at IS NULL AND e.model_name = ?
+                """,
+                (library_id, model_name),
+            ).fetchall()
+
+    def upsert_vector_index(self, library_id: int, model_name: str, dimension: int, index_path: str):
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO vector_indexes (library_id, model_name, dimension, index_path, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(library_id, model_name) DO UPDATE SET
+                    dimension = excluded.dimension,
+                    index_path = excluded.index_path,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (library_id, model_name, dimension, index_path),
+            )
+
+    def get_vector_index(self, library_id: int, model_name: str):
+        with self.get_connection() as conn:
+            return conn.execute(
+                """
+                SELECT id, library_id, model_name, dimension, index_path, updated_at
+                FROM vector_indexes
+                WHERE library_id = ? AND model_name = ?
+                """,
+                (library_id, model_name),
+            ).fetchone()
+
+    def delete_vector_indexes_for_library(self, library_id: int):
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM vector_indexes WHERE library_id = ?", (library_id,))
 
     def list_gallery_files(self, library_id: int, limit: int = 200, offset: int = 0):
         with self.get_connection() as conn:

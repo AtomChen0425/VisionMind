@@ -28,6 +28,12 @@ DEFAULT_LABELS = (
     "city",
     "document",
     "product",
+    "flight",
+    "train",
+    "boat",
+    "car",
+    "bus",
+    "building"
 )
 
 
@@ -109,6 +115,9 @@ class OpenClipAnalyzer:
             return vector
         return vector / norm
 
+    def model_id(self) -> str:
+        return f"{self.model_name}:{self.pretrained}"
+
     def infer(self, image_path: str, labels: Sequence[str] | None = None, top_k: int = 8) -> AnalysisResult:
         self._ensure_model()
         labels = tuple(labels or DEFAULT_LABELS)
@@ -139,6 +148,14 @@ class OpenClipAnalyzer:
     def embedding_to_bytes(self, embedding: np.ndarray) -> bytes:
         normalized = self._normalize(np.asarray(embedding, dtype=np.float32))
         return normalized.astype(np.float32).tobytes()
+
+    def text_to_embedding(self, text: str) -> np.ndarray:
+        self._ensure_model()
+        text_tokens = self._tokenizer([text]).to(self._device)
+        with self._torch.no_grad():
+            text_features = self._model.encode_text(text_tokens)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        return text_features.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
 
 class AnalysisService:

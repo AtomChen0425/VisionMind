@@ -19,6 +19,7 @@ class GalleryItem:
     status: str
     size: int
     mtime_ns: int
+    score: float | None = None
     last_analyzed_at: str | None = None
     xmp_state: str = "not_written"
     deleted_at: str | None = None
@@ -126,6 +127,33 @@ class GalleryModel(QAbstractListModel):
         self.endResetModel()
         self.fetchMore(QModelIndex())
 
+    def set_search_results(self, library_id: int, rows, score_map: dict[int, float] | None = None):
+        self.beginResetModel()
+        self.library_id = library_id
+        self._total_count = len(rows)
+        self._items = []
+        self._thumb_requests.clear()
+        self._thumb_cache.clear()
+        score_map = score_map or {}
+        for row in rows:
+            file_id = int(row["id"])
+            self._items.append(
+                GalleryItem(
+                    file_id=file_id,
+                    file_path=str(row["file_path"]),
+                    relative_path=str(row["relative_path"] or Path(str(row["file_path"])).name),
+                    status=str(row["status"]),
+                    size=int(row["size"]),
+                    mtime_ns=int(row["mtime_ns"]),
+                    score=score_map.get(file_id),
+                    last_analyzed_at=row["last_analyzed_at"],
+                    xmp_state=str(row["xmp_state"] or "not_written"),
+                    deleted_at=row["deleted_at"],
+                    thumbnail=None,
+                )
+            )
+        self.endResetModel()
+
     def rowCount(self, parent=QModelIndex()):
         return len(self._items)
 
@@ -173,7 +201,7 @@ class GalleryModel(QAbstractListModel):
         item = self._items[row]
 
         if role in (Qt.DisplayRole, self.RelativePathRole):
-            return item.relative_path
+            return item.relative_path if item.score is None else f"{item.relative_path}\n{item.score:.3f}"
         if role == Qt.DecorationRole:
             if item.thumbnail is None:
                 if item.file_id not in self._thumb_requests:
@@ -194,7 +222,10 @@ class GalleryModel(QAbstractListModel):
         if role == self.XmpStateRole:
             return item.xmp_state
         if role == Qt.ToolTipRole:
-            return f"{item.relative_path}\n{item.status}\n{item.file_path}"
+            base = f"{item.relative_path}\n{item.status}\n{item.file_path}"
+            if item.score is not None:
+                base += f"\nscore: {item.score:.3f}"
+            return base
         return None
 
     def flags(self, index):
