@@ -137,7 +137,7 @@ class DetailsPanel(QFrame):
 
         pixmap = item.thumbnail or QPixmap(320, 320)
         if item.thumbnail is None:
-            pixmap.fill(QColor("#111827"))
+            pixmap.fill(QColor("#f3f0e8"))
         self.preview.setText("")
         self.preview.set_source_pixmap(pixmap)
         self.path.setText(item.file_path)
@@ -199,6 +199,17 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(18, 18, 18, 18)
         outer.setSpacing(14)
 
+        self.search_mode = QComboBox()
+        self.search_mode.addItems(["Mixed", "Filename", "Semantic"])
+        self.search_mode.currentTextChanged.connect(self._on_search_mode_changed)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Search by filename or meaning")
+        self.search_box.returnPressed.connect(self._execute_search)
+        self.search_btn = QPushButton("Search")
+        self.search_btn.clicked.connect(self._execute_search)
+        self.search_btn.setObjectName("SecondaryButton")
+
         header = QFrame()
         header.setObjectName("HeaderCard")
         header_layout = QHBoxLayout(header)
@@ -212,7 +223,17 @@ class MainWindow(QMainWindow):
         self.subtitle_label.setObjectName("AppSubtitle")
         title_block.addWidget(self.title_label)
         title_block.addWidget(self.subtitle_label)
-        header_layout.addLayout(title_block, 2)
+        header_layout.addLayout(title_block, 1)
+
+        search_panel = QFrame()
+        search_panel.setObjectName("SearchPanel")
+        search_layout = QHBoxLayout(search_panel)
+        search_layout.setContentsMargins(10, 8, 10, 8)
+        search_layout.setSpacing(8)
+        search_layout.addWidget(self.search_box, 1)
+        search_layout.addWidget(self.search_mode)
+        search_layout.addWidget(self.search_btn)
+        header_layout.addWidget(search_panel, 2)
 
         action_block = QHBoxLayout()
         self.choose_btn = QPushButton("Add Library")
@@ -264,17 +285,6 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Idle")
         self.status_label.setWordWrap(True)
 
-        self.search_mode = QComboBox()
-        self.search_mode.addItems(["Mixed", "Filename", "Semantic"])
-        self.search_mode.currentTextChanged.connect(self._on_search_mode_changed)
-
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search by filename or meaning")
-        self.search_box.returnPressed.connect(self._execute_search)
-        self.search_btn = QPushButton("Search")
-        self.search_btn.clicked.connect(self._execute_search)
-        self.search_btn.setObjectName("SecondaryButton")
-
         self.excludes_box = QPlainTextEdit()
         self.excludes_box.setPlaceholderText("One exclude path per line")
         self.excludes_box.setMinimumHeight(120)
@@ -291,19 +301,12 @@ class MainWindow(QMainWindow):
         self.delete_library_btn.clicked.connect(self._delete_current_library)
         self.delete_library_btn.setObjectName("SecondaryButton")
 
-        left_layout.addWidget(QLabel("Search"))
-        search_row = QHBoxLayout()
-        search_row.addWidget(self.search_box, 1)
-        search_row.addWidget(self.search_btn)
-        left_layout.addLayout(search_row)
         left_layout.addWidget(QLabel("Libraries"))
         left_layout.addWidget(self.library_list, 1)
         left_layout.addWidget(QLabel("Current Library"))
         left_layout.addWidget(self.library_label)
         left_layout.addWidget(QLabel("Status"))
         left_layout.addWidget(self.status_label)
-        left_layout.addWidget(QLabel("Search Mode"))
-        left_layout.addWidget(self.search_mode)
         left_layout.addWidget(QLabel("Exclude Paths"))
         left_layout.addWidget(self.excludes_box)
         left_layout.addWidget(self.save_excludes_btn)
@@ -361,93 +364,133 @@ class MainWindow(QMainWindow):
     def _apply_style(self):
         QApplication.setStyle("Fusion")
         palette = QPalette()
-        palette.setColor(QPalette.Window, QColor("#0f172a"))
-        palette.setColor(QPalette.WindowText, QColor("#e2e8f0"))
-        palette.setColor(QPalette.Base, QColor("#111827"))
-        palette.setColor(QPalette.AlternateBase, QColor("#1e293b"))
-        palette.setColor(QPalette.Text, QColor("#e2e8f0"))
-        palette.setColor(QPalette.Button, QColor("#1e293b"))
-        palette.setColor(QPalette.ButtonText, QColor("#e2e8f0"))
-        palette.setColor(QPalette.Highlight, QColor("#38bdf8"))
-        palette.setColor(QPalette.HighlightedText, QColor("#020617"))
+        palette.setColor(QPalette.Window, QColor("#ede7dc"))
+        palette.setColor(QPalette.WindowText, QColor("#2d2924"))
+        palette.setColor(QPalette.Base, QColor("#f6f1e8"))
+        palette.setColor(QPalette.AlternateBase, QColor("#e3dccf"))
+        palette.setColor(QPalette.Text, QColor("#2d2924"))
+        palette.setColor(QPalette.Button, QColor("#efe5d2"))
+        palette.setColor(QPalette.ButtonText, QColor("#2d2924"))
+        palette.setColor(QPalette.Highlight, QColor("#357e72"))
+        palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         QApplication.instance().setPalette(palette)
 
         self.setStyleSheet(
             """
-            QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0b1120, stop:1 #111827);
+            QWidget {
+                color: #2d2924;
+                font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+                font-size: 12px;
             }
-            QFrame#HeaderCard, QFrame#SidePanel, QFrame#CenterPanel, QFrame#DetailsPanel, QFrame#StatCard, QFrame#DetailBlock {
-                background: rgba(15, 23, 42, 210);
-                border: 1px solid rgba(148, 163, 184, 40);
-                border-radius: 18px;
+            QMainWindow {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #e8dfd2, stop:0.52 #f1eadf, stop:1 #dbe7df);
+            }
+            QFrame#HeaderCard, QFrame#SidePanel, QFrame#CenterPanel, QFrame#DetailsPanel, QFrame#StatCard {
+                background: #f4eee3;
+                border: 1px solid #cfc5b6;
+                border-radius: 10px;
+            }
+            QFrame#HeaderCard {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #efe4d4, stop:0.45 #f8f1e6, stop:1 #d9e5dd);
+                border: 1px solid #c8baa6;
+            }
+            QFrame#SearchPanel,
+            QFrame#CenterPanel {
+                background: #ebe3d7;
+                border: 1px solid #cbbfad;
+            }
+            QFrame#SidePanel {
+                background: #e5ddd0;
+            }
+            QFrame#DetailsPanel {
+                background: #eee7db;
+            }
+            QFrame#StatCard {
+                background: #e9e0d2;
+            }
+            QFrame#DetailBlock {
+                background: #e9e1d5;
+                border: 1px solid #d1c6b8;
+                border-radius: 8px;
+                padding: 8px;
             }
             QLabel#AppTitle {
                 font-size: 26px;
-                font-weight: 700;
-                color: #f8fafc;
+                font-weight: 750;
+                color: #29231d;
             }
             QLabel#AppSubtitle {
-                color: #94a3b8;
+                color: #6f6558;
                 font-size: 12px;
             }
             QLabel#MonitoringTag {
-                color: #7dd3fc;
-                background: rgba(14, 165, 233, 26);
-                border: 1px solid rgba(125, 211, 252, 90);
-                border-radius: 999px;
+                color: #214f49;
+                background: #d6e8df;
+                border: 1px solid #a9cbbd;
+                border-radius: 12px;
                 padding: 8px 14px;
                 font-size: 11px;
                 font-weight: 700;
             }
             QLabel#ExifToolStatusTag {
-                color: #a7f3d0;
-                background: rgba(16, 185, 129, 22);
-                border: 1px solid rgba(110, 231, 183, 80);
-                border-radius: 999px;
+                color: #59401a;
+                background: #ead8b7;
+                border: 1px solid #c9ac72;
+                border-radius: 12px;
                 padding: 8px 14px;
                 font-size: 11px;
                 font-weight: 700;
             }
             QLabel#ExifToolPathTag {
-                color: #cbd5e1;
+                color: #6f6558;
                 font-size: 11px;
                 font-family: Consolas, monospace;
                 opacity: 0.95;
             }
             QLabel#StatTitle, QLabel#DetailHeading {
-                color: #94a3b8;
+                color: #716658;
                 font-size: 11px;
                 text-transform: uppercase;
                 letter-spacing: 1px;
             }
             QLabel#StatValue {
-                color: #f8fafc;
+                color: #2b251f;
                 font-size: 28px;
                 font-weight: 700;
             }
             QPushButton {
-                background: #38bdf8;
-                color: #081120;
+                background: #357e72;
+                color: #ffffff;
                 border: none;
-                border-radius: 12px;
+                border-radius: 8px;
                 padding: 10px 16px;
                 font-weight: 600;
             }
-            QPushButton:hover { background: #7dd3fc; }
-            QPushButton:disabled { background: #334155; color: #64748b; }
+            QPushButton:hover { background: #2b6c62; }
+            QPushButton:pressed { background: #23584f; }
+            QPushButton:disabled { background: #cfc5b6; color: #8b8175; }
             QPushButton#SecondaryButton {
-                background: #1e293b;
-                color: #e2e8f0;
-                border: 1px solid rgba(148, 163, 184, 60);
+                background: #e7d8bc;
+                color: #342d25;
+                border: 1px solid #c5af82;
             }
-            QPushButton#SecondaryButton:hover { background: #334155; }
-            QLineEdit, QTextEdit, QPlainTextEdit {
-                background: #0b1220;
-                color: #e2e8f0;
-                border: 1px solid rgba(148, 163, 184, 60);
-                border-radius: 12px;
+            QPushButton#SecondaryButton:hover { background: #dec999; }
+            QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {
+                background: #f7f1e7;
+                color: #2d2924;
+                border: 1px solid #c8bbab;
+                border-radius: 8px;
                 padding: 10px 12px;
+                selection-background-color: #357e72;
+                selection-color: #ffffff;
+            }
+            QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
+                border: 1px solid #357e72;
+                background: #fbf5ea;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 28px;
             }
             QListView, QListWidget {
                 background: transparent;
@@ -455,16 +498,39 @@ class MainWindow(QMainWindow):
                 outline: 0;
             }
             QListView::item, QListWidget::item {
-                background: rgba(15, 23, 42, 180);
-                border: 1px solid rgba(148, 163, 184, 30);
-                border-radius: 16px;
+                background: #f2eadf;
+                border: 1px solid #d5c8b8;
+                border-radius: 8px;
                 padding: 8px;
                 margin: 4px;
-                color: #e2e8f0;
+                color: #302a24;
+            }
+            QListView::item:hover, QListWidget::item:hover {
+                background: #eadcc7;
+                border: 1px solid #bd9f66;
             }
             QListView::item:selected, QListWidget::item:selected {
-                border: 1px solid #38bdf8;
-                background: rgba(56, 189, 248, 60);
+                border: 1px solid #357e72;
+                background: #cfe2d9;
+                color: #1f4640;
+            }
+            QMenu {
+                background: #f4eee3;
+                color: #2d2924;
+                border: 1px solid #c8bbab;
+                border-radius: 8px;
+                padding: 6px;
+            }
+            QMenu::item {
+                padding: 8px 24px;
+                border-radius: 6px;
+            }
+            QMenu::item:selected {
+                background: #cfe2d9;
+                color: #1f4640;
+            }
+            QSplitter::handle {
+                background: #cbc0b1;
             }
             """
         )

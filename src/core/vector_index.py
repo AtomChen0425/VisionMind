@@ -18,7 +18,7 @@ class VectorIndexManager:
         self.db = db
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-
+        self._memory_indexes: dict[str, object] = {}
     @staticmethod
     def _sanitize_model_name(model_name: str) -> str:
         return "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in model_name)
@@ -45,15 +45,29 @@ class VectorIndexManager:
     def _load_index(self, library_id: int, model_name: str, dimension: int):
         if not self._ensure_faiss():
             return None, self.index_path(library_id, model_name)
+        index_path = self.index_path(library_id, model_name)
+        cache_key = f"{library_id}_{model_name}"
+        if cache_key in self._memory_indexes:
+            return self._memory_indexes[cache_key], index_path
+        
         index_info = self.db.get_vector_index(library_id, model_name)
-        index_path = Path(index_info["index_path"]) if index_info is not None else self.index_path(library_id, model_name)
-        if index_path.exists():
-            return faiss.read_index(str(index_path)), index_path
-        return self._new_index(dimension), index_path
+        
+        if index_info is not None and Path(index_info["index_path"]).exists():
+            index_path = Path(index_info["index_path"])
+            index = faiss.read_index(str(index_path))
+            self._memory_indexes[cache_key] = index # insert into memory cache
+            return index, index_path
+        
+        index = self._new_index(dimension)
+        self._memory_indexes[cache_key] = index
+        return index, index_path
 
     def _save_index(self, index, library_id: int, model_name: str, dimension: int, index_path: Path):
         if index is None or not self._ensure_faiss():
             return
+        cache_key = f"{library_id}_{model_name}"
+        self._memory_indexes[cache_key] = index # insert into memory cache
+        
         index_path.parent.mkdir(parents=True, exist_ok=True)
         faiss.write_index(index, str(index_path))
         self.db.upsert_vector_index(library_id, model_name, dimension, str(index_path))

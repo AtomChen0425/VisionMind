@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, QThread, Signal, Slot, QSize
-from PySide6.QtGui import QImage, QPixmap, QColor, QPainter, QLinearGradient, QBrush, QFont
+from PySide6.QtGui import QImage, QPixmap, QColor, QPainter, QLinearGradient, QBrush, QFont, QPen
+from collections import OrderedDict
 
 from src.core.database import DatabaseManager
 from src.core.image_processing import save_thumbnail_png
@@ -74,7 +75,9 @@ class GalleryModel(QAbstractListModel):
         self._total_count = 0
         self._items: list[GalleryItem] = []
         self._thumb_requests: set[int] = set()
-        self._thumb_cache: dict[int, QPixmap] = {}
+        # self._thumb_cache: dict[int, QPixmap] = {}
+        self._thumb_cache: OrderedDict[int, QPixmap] = OrderedDict()
+        self.MAX_CACHE_SIZE = 100 
         self._disk_cache = ThumbnailCache()
         self._placeholder = self._build_placeholder()
 
@@ -94,15 +97,61 @@ class GalleryModel(QAbstractListModel):
 
     def _build_placeholder(self) -> QPixmap:
         pixmap = QPixmap(320, 320)
-        pixmap.fill(QColor("#1f2937"))
+        pixmap.fill(QColor("#e8dfd2"))
         painter = QPainter(pixmap)
         gradient = QLinearGradient(0, 0, 320, 320)
-        gradient.setColorAt(0.0, QColor("#334155"))
-        gradient.setColorAt(1.0, QColor("#111827"))
+        gradient.setColorAt(0.0, QColor("#f4eadb"))
+        gradient.setColorAt(1.0, QColor("#cfe2d9"))
         painter.fillRect(0, 0, 320, 320, QBrush(gradient))
-        painter.setPen(QColor("#94a3b8"))
+        painter.setPen(QColor("#716658"))
         painter.setFont(QFont("Segoe UI", 10))
         painter.drawText(pixmap.rect(), Qt.AlignCenter, "Loading")
+        painter.end()
+        return pixmap
+
+    def _decorated_thumbnail(self, item: GalleryItem) -> QPixmap:
+        '''
+        show the status of the analysis
+        '''
+        
+        base = item.thumbnail or self._placeholder
+        pixmap = QPixmap(base)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        badge_size = 34
+        badge_margin = 10
+        x = pixmap.width() - badge_size - badge_margin
+        y = pixmap.height() - badge_size - badge_margin
+
+        analyzed = item.status == "analyzed"
+        if analyzed:
+            fill = QColor("#2f7d68")
+            stroke = QColor("#e8f4ef")
+        else:
+            fill = QColor("#b7791f")
+            stroke = QColor("#fff4db")
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill)
+        painter.drawEllipse(x, y, badge_size, badge_size)
+
+        pen = QPen(stroke, 2.5)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+
+        if analyzed:
+            painter.drawLine(x + 9, y + 18, x + 15, y + 24)
+            painter.drawLine(x + 15, y + 24, x + 25, y + 11)
+        else:
+            center_x = x + badge_size // 2
+            center_y = y + badge_size // 2
+            painter.drawEllipse(center_x - 7, center_y - 7, 14, 14)
+            painter.drawLine(center_x, center_y - 2, center_x, center_y - 7)
+            painter.drawLine(center_x, center_y, center_x + 4, center_y + 2)
+
         painter.end()
         return pixmap
 
@@ -207,8 +256,8 @@ class GalleryModel(QAbstractListModel):
                 if item.file_id not in self._thumb_requests:
                     self._thumb_requests.add(item.file_id)
                     self.request_thumbnail.emit(item.file_id, item.file_path, item.mtime_ns, item.size)
-                return self._placeholder
-            return item.thumbnail
+                return self._decorated_thumbnail(item)
+            return self._decorated_thumbnail(item)
         if role == self.FileIdRole:
             return item.file_id
         if role == self.FilePathRole:
@@ -242,6 +291,10 @@ class GalleryModel(QAbstractListModel):
     def _on_thumbnail_ready(self, file_id: int, image: QImage):
         pixmap = QPixmap.fromImage(image)
         self._thumb_cache[file_id] = pixmap
+        self._thumb_cache.move_to_end(file_id)
+        if len(self._thumb_cache) > self.MAX_CACHE_SIZE:
+            self._thumb_cache.popitem(last=False) # remove oldest
+            
         self._thumb_requests.discard(file_id)
         for row, item in enumerate(self._items):
             if item.file_id == file_id:
