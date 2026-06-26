@@ -144,7 +144,7 @@ class Scanner:
                     or existing["relative_path"] != relative_path
                     or int(existing["library_id"]) != int(library_id)
                 ) if existing is not None else True
-                status_to_set = "pending" if existing is None or metadata_changed or str(existing["status"]) == "error" or existing["deleted_at"] is not None else str(existing["status"])
+                status_to_set = "pending" if existing is None or metadata_changed or existing["deleted_at"] is not None else str(existing["status"])
 
                 try:
                     file_id, changed = self.db.upsert_file_record(
