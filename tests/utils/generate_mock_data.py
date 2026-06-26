@@ -23,16 +23,19 @@ def generate_mock_data(db_path: str, rows: int = 100_000):
 
     db = DatabaseManager(db_path)
     with db.get_connection() as conn:
+        conn.execute("DELETE FROM vector_indexes")
         conn.execute("DELETE FROM embeddings")
         conn.execute("DELETE FROM tags")
         conn.execute("DELETE FROM files")
+        conn.execute("DELETE FROM libraries")
+        conn.execute("INSERT INTO libraries (id, root_path) VALUES (?, ?)", (1, "/mock/library"))
 
         for index in range(rows):
             file_path = f"/mock/library/photo_{index:07d}.jpg"
             file_hash = _build_hash(file_path)
             conn.execute(
-                "INSERT INTO files (file_path, file_hash, mtime, size, status) VALUES (?, ?, ?, ?, ?)",
-                (file_path, file_hash, float(index), 1024 + index, "indexed"),
+                "INSERT INTO files (library_id, file_path, file_hash, mtime, size, status, relative_path, mtime_ns) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (1, file_path, file_hash, float(index), 1024 + index, "indexed", f"photo_{index:07d}.jpg", index),
             )
 
             file_id = conn.execute(
@@ -44,8 +47,8 @@ def generate_mock_data(db_path: str, rows: int = 100_000):
                 (file_id, "mock-tag", 0.9),
             )
             conn.execute(
-                "INSERT INTO embeddings (file_id, vector) VALUES (?, ?)",
-                (file_id, b"mock-vector"),
+                "INSERT INTO embeddings (file_id, model_name, dimensions, vector) VALUES (?, ?, ?, ?)",
+                (file_id, "mock-model", 2, b"mock-vector"),
             )
 
 

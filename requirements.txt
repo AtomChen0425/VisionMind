@@ -4,3 +4,4 @@ open-clip-torch
 Pillow
 numpy
 pyexiftool
+faiss-cpu

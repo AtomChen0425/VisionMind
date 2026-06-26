@@ -4,10 +4,11 @@ from pathlib import Path
 import json
 import sys
 
-from PySide6.QtCore import QModelIndex, QMimeData, QProcess, QRegularExpression, QSettings, Qt, QSortFilterProxyModel, QSize, QUrl
+from PySide6.QtCore import QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -31,20 +32,13 @@ from PySide6.QtWidgets import (
 from src.core.analyzer import AnalysisService, OpenClipAnalyzer
 from src.core.database import DatabaseManager
 from src.core.metadata_reader import read_image_metadata
+from src.core.semantic_search import SemanticSearchService
 from src.core.pipeline import PhotoProcessingPipeline
 from src.core.exiftool_metadata import ExifToolTagWriter
 from src.core.scanner import Scanner
+from src.core.vector_index import VectorIndexManager
 from src.gui.automation import AutoLibraryController
 from src.gui.gallery import GalleryModel
-
-
-class LibraryFilterProxy(QSortFilterProxyModel):
-    def filterAcceptsRow(self, source_row, source_parent):
-        if not self.filterRegularExpression().pattern():
-            return True
-        index = self.sourceModel().index(source_row, 0, source_parent)
-        text = self.sourceModel().data(index, Qt.DisplayRole) or ""
-        return self.filterRegularExpression().match(str(text)).hasMatch()
 
 
 class StatCard(QFrame):
@@ -172,13 +166,16 @@ class MainWindow(QMainWindow):
         self.scanner = Scanner(self.db)
         self.analyzer = OpenClipAnalyzer()
         self.analysis_service = AnalysisService(self.analyzer)
-        self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter())
+        self.vector_index = VectorIndexManager(self.db)
+        self.search_service = SemanticSearchService(self.db, self.analysis_service, self.vector_index)
+        self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter(), self.vector_index)
         self.controller = AutoLibraryController(self.db, self.scanner, self.pipeline)
 
         self.settings = QSettings("PhotoManager", "PhotoManager")
         self.library_id: int | None = None
         self.root_path: str = ""
         self._updating_library_list = False
+        self._search_mode = "Mixed"
 
         self._build_ui()
         self._bind_signals()
@@ -267,9 +264,16 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Idle")
         self.status_label.setWordWrap(True)
 
+        self.search_mode = QComboBox()
+        self.search_mode.addItems(["Mixed", "Filename", "Semantic"])
+        self.search_mode.currentTextChanged.connect(self._on_search_mode_changed)
+
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Filter by filename")
-        self.search_box.textChanged.connect(self._update_filter)
+        self.search_box.setPlaceholderText("Search by filename or meaning")
+        self.search_box.returnPressed.connect(self._execute_search)
+        self.search_btn = QPushButton("Search")
+        self.search_btn.clicked.connect(self._execute_search)
+        self.search_btn.setObjectName("SecondaryButton")
 
         self.excludes_box = QPlainTextEdit()
         self.excludes_box.setPlaceholderText("One exclude path per line")
@@ -287,14 +291,19 @@ class MainWindow(QMainWindow):
         self.delete_library_btn.clicked.connect(self._delete_current_library)
         self.delete_library_btn.setObjectName("SecondaryButton")
 
+        left_layout.addWidget(QLabel("Search"))
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.search_box, 1)
+        search_row.addWidget(self.search_btn)
+        left_layout.addLayout(search_row)
         left_layout.addWidget(QLabel("Libraries"))
         left_layout.addWidget(self.library_list, 1)
         left_layout.addWidget(QLabel("Current Library"))
         left_layout.addWidget(self.library_label)
         left_layout.addWidget(QLabel("Status"))
         left_layout.addWidget(self.status_label)
-        left_layout.addWidget(QLabel("Search"))
-        left_layout.addWidget(self.search_box)
+        left_layout.addWidget(QLabel("Search Mode"))
+        left_layout.addWidget(self.search_mode)
         left_layout.addWidget(QLabel("Exclude Paths"))
         left_layout.addWidget(self.excludes_box)
         left_layout.addWidget(self.save_excludes_btn)
@@ -466,19 +475,16 @@ class MainWindow(QMainWindow):
     def _selected_gallery_index(self, view_index: QModelIndex | None = None):
         if view_index is not None and view_index.isValid():
             return view_index
-        if not hasattr(self, "proxy_model") or self.proxy_model is None:
-            return QModelIndex()
         return self.view.currentIndex()
 
     def _selected_gallery_item(self, view_index: QModelIndex | None = None):
         index = self._selected_gallery_index(view_index)
-        if not index.isValid():
+        if not index.isValid() or not hasattr(self, "gallery_model"):
             return None
-        source_index = self.proxy_model.mapToSource(index)
-        return self.gallery_model.item(source_index.row())
+        return self.gallery_model.item(index.row())
 
     def _show_gallery_context_menu(self, position):
-        if not hasattr(self, "proxy_model") or not hasattr(self, "gallery_model"):
+        if not hasattr(self, "gallery_model"):
             return
         view_index = self.view.indexAt(position)
         if not view_index.isValid():
@@ -553,6 +559,39 @@ class MainWindow(QMainWindow):
         self.exiftool_status_label.setText("ExifTool: ready")
         self.exiftool_path_label.setText(resolved_path)
 
+    def _set_gallery_library_view(self):
+        if self.library_id is None:
+            return
+        self.gallery_model.refresh(self.library_id)
+        self.view.setModel(self.gallery_model)
+        self._sync_library_excludes_box()
+        self._refresh_stats()
+        self._update_library_action_state()
+
+    def _on_search_mode_changed(self, mode: str):
+        self._search_mode = mode
+
+    def _execute_search(self):
+        if self.library_id is None or not hasattr(self, "gallery_model"):
+            return
+        query = self.search_box.text().strip()
+        if not query:
+            self._set_gallery_library_view()
+            return
+
+        try:
+            if self._search_mode == "Filename":
+                rows = self.db.search_files_by_name(self.library_id, query, limit=200)
+                self.gallery_model.set_search_results(self.library_id, rows)
+            else:
+                mode = "mixed" if self._search_mode == "Mixed" else "semantic"
+                file_ids, score_map, _source_map = self.search_service.search(self.library_id, query, mode=mode, limit=200)
+                rows = self.db.list_files_by_ids(self.library_id, file_ids)
+                self.gallery_model.set_search_results(self.library_id, rows, score_map=score_map)
+            self.view.setModel(self.gallery_model)
+        except Exception as exc:
+            self._set_status(f"Search failed: {exc}")
+
     def _refresh_stats(self):
         if self.library_id is None:
             self.total_card.set_value("0")
@@ -607,9 +646,9 @@ class MainWindow(QMainWindow):
             self.library_label.setText("No library selected")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
-            self._refresh_stats()
-            self._update_library_action_state()
             return
+        self._refresh_stats()
+        self._update_library_action_state()
         library_id = int(item.data(Qt.UserRole))
         self.controller.set_active_library(library_id)
 
@@ -617,10 +656,6 @@ class MainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "Select photo library")
         if directory:
             self._select_or_add_library(directory)
-
-    def _update_filter(self, text: str):
-        if hasattr(self, "proxy_model"):
-            self.proxy_model.setFilterRegularExpression(QRegularExpression(QRegularExpression.escape(text)))
 
     def _on_libraries_changed(self, libraries):
         self._updating_library_list = True
@@ -661,39 +696,36 @@ class MainWindow(QMainWindow):
         if hasattr(self, "gallery_model"):
             self.gallery_model.shutdown()
         self.gallery_model = GalleryModel(self.db, library_id)
-        self.proxy_model = LibraryFilterProxy(self)
-        self.proxy_model.setSourceModel(self.gallery_model)
-        self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.view.setModel(self.proxy_model)
+        self.view.setModel(self.gallery_model)
         self.view.setIconSize(self.gallery_model._placeholder.size())
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
-        self._sync_library_excludes_box()
-        self._refresh_stats()
-        self._update_library_action_state()
+        self.search_box.blockSignals(True)
+        self.search_box.clear()
+        self.search_box.blockSignals(False)
+        self._set_gallery_library_view()
 
     def _on_scan_finished(self, summary):
-        if hasattr(self, "gallery_model") and self.library_id is not None:
-            self.gallery_model.refresh(self.library_id)
-        self._refresh_stats()
-        self._update_library_action_state()
+        if self.library_id is not None:
+            self._set_gallery_library_view()
+            if self.search_box.text().strip():
+                self._execute_search()
         self._set_status(
             f"Scan complete: {summary.root_path} | {summary.files_seen} seen, {summary.files_added + summary.files_updated} changed, {summary.files_deleted} deleted"
         )
 
     def _on_analysis_finished(self, outcomes):
-        if hasattr(self, "gallery_model") and self.library_id is not None:
-            self.gallery_model.refresh(self.library_id)
-        self._refresh_stats()
+        if self.library_id is not None:
+            self._set_gallery_library_view()
+            if self.search_box.text().strip():
+                self._execute_search()
         self._refresh_exiftool_status()
-        self._update_library_action_state()
         self._set_status(f"Analysis complete: {len(outcomes)} files processed")
 
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex):
         if not current.isValid():
             self.details_panel.set_item(None, [])
             return
-        source_index = self.proxy_model.mapToSource(current)
-        item = self.gallery_model.item(source_index.row())
+        item = self.gallery_model.item(current.row())
         if item is None:
             self.details_panel.set_item(None, [])
             return
@@ -717,6 +749,7 @@ class MainWindow(QMainWindow):
     def _delete_current_library(self):
         if self.library_id is None:
             return
+        library_id = self.library_id
         response = QMessageBox.question(
             self,
             "Delete Library",
@@ -727,7 +760,8 @@ class MainWindow(QMainWindow):
         if response != QMessageBox.Yes:
             return
         try:
-            self.controller.remove_library(self.library_id)
+            self.controller.remove_library(library_id)
+            self.vector_index.delete_library_indexes(library_id)
         except Exception as exc:
             QMessageBox.critical(self, "Delete Library Failed", str(exc))
             return

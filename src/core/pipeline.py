@@ -6,6 +6,7 @@ from typing import Sequence
 from .analyzer import AnalysisService, AnalysisResult
 from .database import DatabaseManager
 from .exiftool_metadata import ExifToolTagWriter
+from .vector_index import VectorIndexManager
 
 
 @dataclass(slots=True)
@@ -23,10 +24,12 @@ class PhotoProcessingPipeline:
         db: DatabaseManager,
         analysis_service: AnalysisService,
         metadata_writer: ExifToolTagWriter | None = None,
+        vector_index: VectorIndexManager | None = None,
     ):
         self.db = db
         self.analysis_service = analysis_service
         self.metadata_writer = metadata_writer or ExifToolTagWriter()
+        self.vector_index = vector_index
 
     def process_file(self, file_id: int, image_path: str, *, label_candidates: Sequence[str] | None = None) -> ProcessingOutcome:
         result = self.analysis_service.analyze_image(image_path, labels=label_candidates)
@@ -48,6 +51,10 @@ class PhotoProcessingPipeline:
                 dimensions=int(result.embedding.shape[0]),
                 model_name=result.model_name,
             )
+            if self.vector_index is not None:
+                file_row = self.db.get_file_by_id(file_id)
+                if file_row is not None:
+                    self.vector_index.upsert_embedding(int(file_row["library_id"]), result.model_name, file_id, result.embedding)
 
         self.db.set_file_analyzed(file_id)
         return ProcessingOutcome(

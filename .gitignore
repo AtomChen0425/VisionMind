@@ -1,6 +1,7 @@
 data/
 .vscode/
 __pycache__/
+.tmp/
 *.pyc
 *.pyo
 *.pyd
