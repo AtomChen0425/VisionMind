@@ -41,25 +41,33 @@ class AnalysisWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, pipeline: PhotoProcessingPipeline, file_rows: Sequence[object]):
+    def __init__(self, pipeline: PhotoProcessingPipeline, file_rows: Sequence[object], *, batch_size: int = 8):
         super().__init__()
         self.pipeline = pipeline
         self.file_rows = list(file_rows)
+        self.batch_size = max(1, int(batch_size))
 
     def run(self):
         try:
             total = len(self.file_rows)
             outcomes: list[ProcessingOutcome] = []
-            for index, row in enumerate(self.file_rows, start=1):
-                file_id = int(row["id"])
-                image_path = str(row["file_path"])
+            processed = 0
+            for batch_start in range(0, total, self.batch_size):
+                batch_rows = self.file_rows[batch_start : batch_start + self.batch_size]
+                batch_items = [(int(row["id"]), str(row["file_path"])) for row in batch_rows]
                 try:
-                    outcome = self.pipeline.process_file(file_id, image_path)
+                    batch_outcomes = self.pipeline.process_files(batch_items)
                 except Exception as exc:
-                    self.pipeline.db.set_file_error(file_id, str(exc))
+                    for file_id, image_path in batch_items:
+                        try:
+                            outcomes.append(self.pipeline.process_file(file_id, image_path))
+                        except Exception as item_exc:
+                            self.pipeline.db.set_file_error(file_id, str(item_exc or exc))
                 else:
-                    outcomes.append(outcome)
-                self.progress_changed.emit(index, total, image_path)
+                    outcomes.extend(batch_outcomes)
+                for _file_id, image_path in batch_items:
+                    processed += 1
+                    self.progress_changed.emit(processed, total, image_path)
             self.finished.emit(outcomes)
         except Exception as exc:
             self.failed.emit(str(exc))

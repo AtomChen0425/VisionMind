@@ -33,6 +33,22 @@ class PhotoProcessingPipeline:
 
     def process_file(self, file_id: int, image_path: str, *, label_candidates: Sequence[str] | None = None) -> ProcessingOutcome:
         result = self.analysis_service.analyze_image(image_path, labels=label_candidates)
+        return self._write_result(file_id, image_path, result)
+
+    def process_files(
+        self,
+        file_items: Sequence[tuple[int, str]],
+        *,
+        label_candidates: Sequence[str] | None = None,
+    ) -> list[ProcessingOutcome]:
+        image_paths = [image_path for _, image_path in file_items]
+        results = self.analysis_service.analyze_images(image_paths, labels=label_candidates)
+        outcomes = []
+        for (file_id, image_path), result in zip(file_items, results):
+            outcomes.append(self._write_result(file_id, image_path, result))
+        return outcomes
+
+    def _write_result(self, file_id: int, image_path: str, result: AnalysisResult) -> ProcessingOutcome:
         tags = [(prediction.tag_name, prediction.confidence) for prediction in result.tags]
         tags_written = int(self.db.replace_tags(file_id, tags, source="open_clip", model_name=result.model_name))
 

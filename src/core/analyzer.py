@@ -119,13 +119,22 @@ class OpenClipAnalyzer:
         return f"{self.model_name}:{self.pretrained}"
 
     def infer(self, image_path: str, labels: Sequence[str] | None = None, top_k: int = 8) -> AnalysisResult:
+        return self.infer_batch([image_path], labels=labels, top_k=top_k)[0]
+
+    def infer_batch(self, image_paths: Sequence[str], labels: Sequence[str] | None = None, top_k: int = 8) -> list[AnalysisResult]:
         self._ensure_model()
         labels = tuple(labels or DEFAULT_LABELS)
+        image_paths = [str(path) for path in image_paths]
+        if not image_paths:
+            return []
 
         from PIL import Image
 
-        image = Image.open(image_path).convert("RGB")
-        image_tensor = self._preprocess(image).unsqueeze(0).to(self._device)
+        image_tensors = []
+        for image_path in image_paths:
+            with Image.open(image_path) as image:
+                image_tensors.append(self._preprocess(image.convert("RGB")))
+        image_tensor = self._torch.stack(image_tensors, dim=0).to(self._device)
         label_tokens = self._tokenizer(list(labels)).to(self._device)
 
         with self._torch.no_grad():
@@ -135,15 +144,20 @@ class OpenClipAnalyzer:
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             logits = (100.0 * image_features @ text_features.T).softmax(dim=-1)
-            probabilities = logits.squeeze(0).detach().cpu().numpy()
-            embedding = image_features.squeeze(0).detach().cpu().numpy().astype(np.float32)
+            probabilities = logits.detach().cpu().numpy()
+            embeddings = image_features.detach().cpu().numpy().astype(np.float32)
 
-        ranked_indexes = np.argsort(probabilities)[::-1][: max(1, top_k)]
-        tags = [
-            TagPrediction(tag_name=labels[index], confidence=float(probabilities[index]))
-            for index in ranked_indexes
-        ]
-        return AnalysisResult(tags=tags, embedding=embedding, model_name=f"{self.model_name}:{self.pretrained}")
+        results = []
+        model_name = self.model_id()
+        for row_index in range(len(image_paths)):
+            row_probabilities = probabilities[row_index]
+            ranked_indexes = np.argsort(row_probabilities)[::-1][: max(1, top_k)]
+            tags = [
+                TagPrediction(tag_name=labels[index], confidence=float(row_probabilities[index]))
+                for index in ranked_indexes
+            ]
+            results.append(AnalysisResult(tags=tags, embedding=embeddings[row_index], model_name=model_name))
+        return results
 
     def embedding_to_bytes(self, embedding: np.ndarray) -> bytes:
         normalized = self._normalize(np.asarray(embedding, dtype=np.float32))
@@ -164,3 +178,6 @@ class AnalysisService:
 
     def analyze_image(self, image_path: str, labels: Sequence[str] | None = None, top_k: int = 8) -> AnalysisResult:
         return self.analyzer.infer(image_path, labels=labels, top_k=top_k)
+
+    def analyze_images(self, image_paths: Sequence[str], labels: Sequence[str] | None = None, top_k: int = 8) -> list[AnalysisResult]:
+        return self.analyzer.infer_batch(image_paths, labels=labels, top_k=top_k)

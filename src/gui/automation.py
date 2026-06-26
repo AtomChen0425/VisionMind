@@ -19,12 +19,21 @@ class AutoLibraryController(QObject):
     analysis_finished = Signal(object)
     message = Signal(str)
 
-    def __init__(self, db: DatabaseManager, scanner: Scanner, pipeline: PhotoProcessingPipeline, *, scan_interval_ms: int = 45000):
+    def __init__(
+        self,
+        db: DatabaseManager,
+        scanner: Scanner,
+        pipeline: PhotoProcessingPipeline,
+        *,
+        scan_interval_ms: int = 45000,
+        analysis_batch_size: int = 8,
+    ):
         super().__init__()
         self.db = db
         self.scanner = scanner
         self.pipeline = pipeline
         self.scan_interval_ms = scan_interval_ms
+        self.analysis_batch_size = max(1, int(analysis_batch_size))
         self.scan_running = False
         self.analysis_running = False
         self._scan_queue: list[int] = []
@@ -195,7 +204,7 @@ class AutoLibraryController(QObject):
         self.message.emit(f"Analyzing {len(pending_rows)} pending files in {root_path}...")
 
         self.analysis_thread = QThread(self)
-        self.analysis_worker = AnalysisWorker(self.pipeline, pending_rows)
+        self.analysis_worker = AnalysisWorker(self.pipeline, pending_rows, batch_size=self.analysis_batch_size)
         self.analysis_worker.moveToThread(self.analysis_thread)
         self.analysis_thread.started.connect(self.analysis_worker.run)
         self.analysis_worker.finished.connect(self._on_analysis_finished)
