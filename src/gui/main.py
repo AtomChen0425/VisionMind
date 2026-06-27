@@ -173,6 +173,7 @@ class MainWindow(QMainWindow):
         self.db = DatabaseManager("data/photo_manager.db")
         self.scanner = Scanner(self.db)
         self.analyzer = OpenClipAnalyzer()
+        self.logger.info("open_clip cache root=%s", self.analyzer.model_cache_root)
         self.analysis_service = AnalysisService(self.analyzer)
         self.vector_index = VectorIndexManager(self.db)
         self.search_service = SemanticSearchService(self.db, self.analysis_service, self.vector_index)

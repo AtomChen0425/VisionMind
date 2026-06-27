@@ -8,6 +8,7 @@ import logging
 import numpy as np
 
 from .image_processing import load_image_for_processing
+from .model_cache import configure_model_cache
 
 
 DEFAULT_LABELS = (
@@ -65,6 +66,7 @@ class OpenClipAnalyzer:
         self.model_name = model_name
         self.pretrained = pretrained
         self._device_name = device
+        self.model_cache_root = configure_model_cache()
         self._model = None
         self._preprocess = None
         self._tokenizer = None
@@ -95,15 +97,20 @@ class OpenClipAnalyzer:
             return
 
         try:
+            import inspect
             import open_clip
             import torch
         except Exception as exc:  # pragma: no cover - import failure is environment-dependent
             raise RuntimeError("open-clip-torch and torch are required for AI analysis") from exc
 
         self._device = self._resolve_device()
+        create_kwargs = {}
+        if "cache_dir" in inspect.signature(open_clip.create_model_and_transforms).parameters:
+            create_kwargs["cache_dir"] = str(self.model_cache_root)
         model, _, preprocess = open_clip.create_model_and_transforms(
             self.model_name,
             pretrained=self.pretrained,
+            **create_kwargs,
         )
         model = model.to(self._device)
         tokenizer = open_clip.get_tokenizer(self.model_name)
@@ -125,12 +132,14 @@ class OpenClipAnalyzer:
     def infer(self, image_path: str, labels: Sequence[str] | None = None, top_k: int = 8) -> AnalysisResult:
         logger.debug("Inferring single image path=%s", image_path)
         return self.infer_batch([image_path], labels=labels, top_k=top_k)[0]
-    def apply_prompt_template(self,labels):
-        template=PROMPT_TEMPLATE
+
+    def apply_prompt_template(self, labels):
+        template = PROMPT_TEMPLATE
         return tuple(template.format(label) for label in labels)
+
     def infer_batch(self, image_paths: Sequence[str], labels: Sequence[str] | None = None, top_k: int = 8) -> list[AnalysisResult]:
         self._ensure_model()
-        raw_labels= tuple(labels or DEFAULT_LABELS)
+        raw_labels = tuple(labels or DEFAULT_LABELS)
         labels = self.apply_prompt_template(raw_labels)
         image_paths = [str(path) for path in image_paths]
         if not image_paths:
