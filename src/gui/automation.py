@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
@@ -29,6 +30,7 @@ class AutoLibraryController(QObject):
         analysis_batch_size: int = 8,
     ):
         super().__init__()
+        self.logger = logging.getLogger(__name__)
         self.db = db
         self.scanner = scanner
         self.pipeline = pipeline
@@ -52,6 +54,7 @@ class AutoLibraryController(QObject):
 
     def refresh_libraries(self):
         libraries = self.db.list_libraries()
+        self.logger.info("Refreshing libraries count=%s", len(libraries))
         self.libraries_changed.emit(libraries)
         library_ids = {int(row["id"]) for row in libraries}
         if self._active_library_id not in library_ids:
@@ -68,6 +71,7 @@ class AutoLibraryController(QObject):
             self.timer.start()
 
     def add_library(self, root_path: str) -> int:
+        self.logger.info("Adding library root=%s", root_path)
         library_id = self.db.register_library(root_path)
         self.refresh_libraries()
         self.set_active_library(library_id)
@@ -76,6 +80,7 @@ class AutoLibraryController(QObject):
     def remove_library(self, library_id: int):
         if self.scan_running or self.analysis_running:
             raise RuntimeError("Cannot delete a library while scan or analysis is running")
+        self.logger.info("Removing library library_id=%s", library_id)
         with self.db.get_connection() as conn:
             conn.execute("DELETE FROM libraries WHERE id = ?", (library_id,))
         if self._active_library_id == library_id:
@@ -132,6 +137,7 @@ class AutoLibraryController(QObject):
             self.refresh_libraries()
             return
 
+        self.logger.info("Auto scan scheduled library_id=%s root=%s", library_id, library["root_path"])
         self._start_scan_for_library(library_id, str(library["root_path"]))
 
     def scan_library(self, library_id: int):
@@ -145,11 +151,13 @@ class AutoLibraryController(QObject):
         if library is None:
             self.refresh_libraries()
             return
+        self.logger.info("Manual scan scheduled library_id=%s root=%s", library_id, library["root_path"])
         self._start_scan_for_library(library_id, str(library["root_path"]))
 
     def _start_scan_for_library(self, library_id: int, root_path: str):
         self.scan_running = True
         excludes = [str(row["path"]) for row in self.db.get_library_excludes(library_id)]
+        self.logger.info("Starting scan library_id=%s root=%s excludes=%s", library_id, root_path, len(excludes))
         self.scan_started.emit(library_id, root_path)
         self.message.emit(f"Watching {root_path} for changes...")
 
@@ -168,6 +176,16 @@ class AutoLibraryController(QObject):
     @Slot(object)
     def _on_scan_finished(self, summary):
         self.scan_running = False
+        self.logger.info(
+            "Scan finished library_id=%s seen=%s added=%s updated=%s unchanged=%s deleted=%s errors=%s",
+            summary.library_id,
+            summary.files_seen,
+            summary.files_added,
+            summary.files_updated,
+            summary.files_unchanged,
+            summary.files_deleted,
+            summary.errors,
+        )
         self.scan_finished.emit(summary)
         self.message.emit(
             f"Scan complete: {summary.root_path} | {summary.files_seen} seen, {summary.files_added + summary.files_updated} changed, {summary.files_deleted} deleted"
@@ -177,16 +195,19 @@ class AutoLibraryController(QObject):
     @Slot(str)
     def _on_scan_failed(self, message: str):
         self.scan_running = False
+        self.logger.error("Scan failed message=%s", message)
         self.message.emit(f"Scan failed: {message}")
 
     def _maybe_start_analysis(self, library_id: int):
         if self.analysis_running:
             return
         if not self.pipeline.analysis_service.analyzer.available():
+            self.logger.info("Analysis skipped because analyzer unavailable library_id=%s", library_id)
             return
 
         pending_rows = self.db.list_pending_files(library_id)
         if not pending_rows:
+            self.logger.info("No pending files library_id=%s", library_id)
             self.message.emit("Library is up to date")
             return
 
@@ -200,6 +221,13 @@ class AutoLibraryController(QObject):
 
         self.analysis_running = True
         root_path = str(library["root_path"])
+        self.logger.info(
+            "Starting analysis library_id=%s root=%s pending=%s batch_size=%s",
+            library_id,
+            root_path,
+            len(pending_rows),
+            self.analysis_batch_size,
+        )
         self.analysis_started.emit(library_id, root_path)
         self.message.emit(f"Analyzing {len(pending_rows)} pending files in {root_path}...")
 
@@ -218,10 +246,12 @@ class AutoLibraryController(QObject):
     @Slot(object)
     def _on_analysis_finished(self, outcomes):
         self.analysis_running = False
+        self.logger.info("Analysis finished outcomes=%s", len(outcomes))
         self.analysis_finished.emit(outcomes)
         self.message.emit(f"Analysis complete: {len(outcomes)} files processed")
 
     @Slot(str)
     def _on_analysis_failed(self, message: str):
         self.analysis_running = False
+        self.logger.error("Analysis failed message=%s", message)
         self.message.emit(f"Analysis failed: {message}")

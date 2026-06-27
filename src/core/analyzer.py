@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import logging
 import numpy as np
 
 from .image_processing import load_image_for_processing
@@ -39,6 +40,7 @@ DEFAULT_LABELS = (
 )
 
 PROMPT_TEMPLATE = "a photo of a {}"
+logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class TagPrediction:
     tag_name: str
@@ -121,6 +123,7 @@ class OpenClipAnalyzer:
         return f"{self.model_name}:{self.pretrained}"
 
     def infer(self, image_path: str, labels: Sequence[str] | None = None, top_k: int = 8) -> AnalysisResult:
+        logger.debug("Inferring single image path=%s", image_path)
         return self.infer_batch([image_path], labels=labels, top_k=top_k)[0]
     def apply_prompt_template(self,labels):
         template=PROMPT_TEMPLATE
@@ -132,6 +135,7 @@ class OpenClipAnalyzer:
         image_paths = [str(path) for path in image_paths]
         if not image_paths:
             return []
+        logger.info("Infer batch started count=%s model=%s", len(image_paths), self.model_id())
 
         image_tensors = []
         for image_path in image_paths:
@@ -160,6 +164,7 @@ class OpenClipAnalyzer:
                 for index in ranked_indexes
             ]
             results.append(AnalysisResult(tags=tags, embedding=embeddings[row_index], model_name=model_name))
+        logger.info("Infer batch finished count=%s model=%s", len(results), model_name)
         return results
 
     def embedding_to_bytes(self, embedding: np.ndarray) -> bytes:
@@ -168,6 +173,7 @@ class OpenClipAnalyzer:
 
     def text_to_embedding(self, text: str) -> np.ndarray:
         self._ensure_model()
+        logger.debug("Creating text embedding text=%s", text)
         text_tokens = self._tokenizer([text]).to(self._device)
         with self._torch.no_grad():
             text_features = self._model.encode_text(text_tokens)

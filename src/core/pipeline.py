@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Sequence
 
@@ -31,6 +32,7 @@ class PhotoProcessingPipeline:
         thumbnail_cache: ThumbnailCache | None = None,
         analysis_thumbnail_size: int = 320,
     ):
+        self.logger = logging.getLogger(__name__)
         self.db = db
         self.analysis_service = analysis_service
         self.metadata_writer = metadata_writer or ExifToolTagWriter()
@@ -48,6 +50,7 @@ class PhotoProcessingPipeline:
         label_candidates: Sequence[str] | None = None,
     ) -> ProcessingOutcome:
         analysis_path = str(self._ensure_analysis_thumbnail(image_path, mtime_ns=mtime_ns, size=size))
+        self.logger.info("Processing file_id=%s image=%s analysis_source=%s", file_id, image_path, analysis_path)
         result = self.analysis_service.analyze_image(analysis_path, labels=label_candidates)
         return self._write_result(file_id, image_path, result)
 
@@ -62,6 +65,7 @@ class PhotoProcessingPipeline:
             str(self._ensure_analysis_thumbnail(image_path, mtime_ns=mtime_ns, size=size))
             for _, image_path, mtime_ns, size in normalized_items
         ]
+        self.logger.info("Processing batch count=%s", len(normalized_items))
         results = self.analysis_service.analyze_images(analysis_paths, labels=label_candidates)
         outcomes = []
         for (file_id, image_path, _mtime_ns, _size), result in zip(normalized_items, results):
@@ -88,11 +92,18 @@ class PhotoProcessingPipeline:
             thumb_size=self.analysis_thumbnail_size,
         )
         if not cache_path.exists():
+            self.logger.debug(
+                "Creating analysis thumbnail source=%s cache=%s size=%s",
+                source_path,
+                cache_path,
+                self.analysis_thumbnail_size,
+            )
             save_thumbnail_png(source_path, cache_path, thumb_size=self.analysis_thumbnail_size)
         return cache_path
 
     def _write_result(self, file_id: int, image_path: str, result: AnalysisResult) -> ProcessingOutcome:
         tags = [(prediction.tag_name, prediction.confidence) for prediction in result.tags]
+        self.logger.debug("Writing result file_id=%s tags=%s embedding=%s", file_id, len(tags), result.embedding is not None)
         tags_written = int(self.db.replace_tags(file_id, tags, source="open_clip", model_name=result.model_name))
 
         metadata_written = False
@@ -100,6 +111,7 @@ class PhotoProcessingPipeline:
             output_path = self.metadata_writer.write(image_path, [prediction.tag_name for prediction in result.tags if prediction.confidence > 0.2])
             metadata_written = output_path.exists()
             self.db.set_metadata_state(file_id, "written")
+            self.logger.info("Metadata written file_id=%s path=%s", file_id, image_path)
 
         embedding_written = False
         if result.embedding is not None:
@@ -113,9 +125,17 @@ class PhotoProcessingPipeline:
             if self.vector_index is not None:
                 file_row = self.db.get_file_by_id(file_id)
                 if file_row is not None:
+                    self.logger.debug("Updating vector index file_id=%s library_id=%s", file_id, file_row["library_id"])
                     self.vector_index.upsert_embedding(int(file_row["library_id"]), result.model_name, file_id, result.embedding)
 
         self.db.set_file_analyzed(file_id)
+        self.logger.info(
+            "Processed file_id=%s tags_written=%s embedding_written=%s metadata_written=%s",
+            file_id,
+            tags_written,
+            embedding_written,
+            metadata_written,
+        )
         return ProcessingOutcome(
             file_id=file_id,
             image_path=image_path,

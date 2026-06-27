@@ -4,12 +4,15 @@ from collections import defaultdict
 from datetime import datetime
 from fractions import Fraction
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from PIL import ExifTags, Image
 
 from .image_processing import load_image_for_processing
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_iso8601(value: str) -> datetime:
@@ -170,7 +173,9 @@ def get_img_exif(image: Image.Image) -> dict[str, Any]:
 
 def read_image_metadata(image_path: str | Path) -> dict[str, Any]:
     try:
+        logger.debug("Reading image metadata path=%s", image_path)
         image = load_image_for_processing(image_path)
     except Exception:
+        logger.exception("Failed to read image metadata path=%s", image_path)
         return {}
     return get_img_exif(image)

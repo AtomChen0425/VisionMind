@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Sequence
 
 from PySide6.QtCore import QObject, Signal
@@ -20,9 +21,11 @@ class ScanWorker(QObject):
         self.scanner = scanner
         self.root_dir = root_dir
         self.exclude_paths = list(exclude_paths or [])
+        self.logger = logging.getLogger(__name__)
 
     def run(self):
         try:
+            self.logger.info("Scan worker started root=%s excludes=%s", self.root_dir, len(self.exclude_paths))
             summary = self.scanner.scan(
                 self.root_dir,
                 exclude_paths=self.exclude_paths,
@@ -30,6 +33,7 @@ class ScanWorker(QObject):
             )
             self.finished.emit(summary)
         except Exception as exc:
+            self.logger.exception("Scan worker failed root=%s", self.root_dir)
             self.failed.emit(str(exc))
 
     def _emit_progress(self, summary: ScanSummary):
@@ -46,12 +50,14 @@ class AnalysisWorker(QObject):
         self.pipeline = pipeline
         self.file_rows = list(file_rows)
         self.batch_size = max(1, int(batch_size))
+        self.logger = logging.getLogger(__name__)
 
     def run(self):
         try:
             total = len(self.file_rows)
             outcomes: list[ProcessingOutcome] = []
             processed = 0
+            self.logger.info("Analysis worker started files=%s batch_size=%s", total, self.batch_size)
             for batch_start in range(0, total, self.batch_size):
                 batch_rows = self.file_rows[batch_start : batch_start + self.batch_size]
                 batch_items = [
@@ -59,12 +65,15 @@ class AnalysisWorker(QObject):
                     for row in batch_rows
                 ]
                 try:
+                    self.logger.debug("Processing batch start=%s size=%s", batch_start, len(batch_items))
                     batch_outcomes = self.pipeline.process_files(batch_items)
                 except Exception as exc:
+                    self.logger.exception("Batch analysis failed start=%s size=%s", batch_start, len(batch_items))
                     for file_id, image_path, mtime_ns, size in batch_items:
                         try:
                             outcomes.append(self.pipeline.process_file(file_id, image_path, mtime_ns=mtime_ns, size=size))
                         except Exception as item_exc:
+                            self.logger.exception("Fallback analysis failed file_id=%s path=%s", file_id, image_path)
                             self.pipeline.db.set_file_error(file_id, str(item_exc or exc))
                 else:
                     outcomes.extend(batch_outcomes)
@@ -72,5 +81,7 @@ class AnalysisWorker(QObject):
                     processed += 1
                     self.progress_changed.emit(processed, total, image_path)
             self.finished.emit(outcomes)
+            self.logger.info("Analysis worker finished outcomes=%s", len(outcomes))
         except Exception as exc:
+            self.logger.exception("Analysis worker crashed")
             self.failed.emit(str(exc))

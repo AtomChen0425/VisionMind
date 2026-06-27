@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 
 from PIL import Image, ImageOps
 import numpy as np
@@ -12,6 +13,8 @@ except Exception:  # pragma: no cover - rawpy is optional in some environments
 
 from .supported_image_types import RAW_SUPPORTED_IMAGE_EXTENSIONS
 
+logger = logging.getLogger(__name__)
+
 
 def _is_raw_image_path(image_path: str | Path) -> bool:
     return Path(image_path).suffix.lower() in RAW_SUPPORTED_IMAGE_EXTENSIONS
@@ -20,12 +23,14 @@ def _is_raw_image_path(image_path: str | Path) -> bool:
 def load_image_for_processing(image_path: str | Path) -> Image.Image:
     path = Path(image_path)
     if not _is_raw_image_path(path):
+        logger.debug("Loading standard image path=%s", path)
         with Image.open(path) as image:
             return image.copy()
 
     if rawpy is None:
         raise RuntimeError("rawpy is required to process raw image files")
 
+    logger.debug("Loading raw image path=%s via rawpy", path)
     with rawpy.imread(str(path)) as raw:
         rgb = raw.postprocess(
             output_bps=8,
@@ -37,6 +42,7 @@ def load_image_for_processing(image_path: str | Path) -> Image.Image:
 
 
 def create_thumbnail(image_path: str | Path, thumb_size: int = 320) -> Image.Image:
+    logger.debug("Creating thumbnail source=%s size=%s", image_path, thumb_size)
     image = load_image_for_processing(image_path)
     image = ImageOps.exif_transpose(image)
     if image.mode not in ("RGB", "RGBA"):
@@ -52,4 +58,5 @@ def save_thumbnail_png(image_path: str | Path, cache_path: str | Path, thumb_siz
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     thumbnail = create_thumbnail(image_path, thumb_size=thumb_size)
     thumbnail.save(cache_path, format="PNG", optimize=True)
+    logger.debug("Thumbnail saved source=%s cache=%s size=%s", image_path, cache_path, thumb_size)
     return cache_path
