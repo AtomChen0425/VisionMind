@@ -38,7 +38,7 @@ DEFAULT_LABELS = (
     "building"
 )
 
-
+PROMPT_TEMPLATE = "a photo of a {}"
 @dataclass(slots=True)
 class TagPrediction:
     tag_name: str
@@ -122,10 +122,13 @@ class OpenClipAnalyzer:
 
     def infer(self, image_path: str, labels: Sequence[str] | None = None, top_k: int = 8) -> AnalysisResult:
         return self.infer_batch([image_path], labels=labels, top_k=top_k)[0]
-
+    def apply_prompt_template(self,labels):
+        template=PROMPT_TEMPLATE
+        return tuple(template.format(label) for label in labels)
     def infer_batch(self, image_paths: Sequence[str], labels: Sequence[str] | None = None, top_k: int = 8) -> list[AnalysisResult]:
         self._ensure_model()
-        labels = tuple(labels or DEFAULT_LABELS)
+        raw_labels= tuple(labels or DEFAULT_LABELS)
+        labels = self.apply_prompt_template(raw_labels)
         image_paths = [str(path) for path in image_paths]
         if not image_paths:
             return []
@@ -153,7 +156,7 @@ class OpenClipAnalyzer:
             row_probabilities = probabilities[row_index]
             ranked_indexes = np.argsort(row_probabilities)[::-1][: max(1, top_k)]
             tags = [
-                TagPrediction(tag_name=labels[index], confidence=float(row_probabilities[index]))
+                TagPrediction(tag_name=raw_labels[index], confidence=float(row_probabilities[index]))
                 for index in ranked_indexes
             ]
             results.append(AnalysisResult(tags=tags, embedding=embeddings[row_index], model_name=model_name))

@@ -97,7 +97,7 @@ class PhotoProcessingPipeline:
 
         metadata_written = False
         if result.tags:
-            output_path = self.metadata_writer.write(image_path, [prediction.tag_name for prediction in result.tags if prediction.confidence > 0.5])
+            output_path = self.metadata_writer.write(image_path, [prediction.tag_name for prediction in result.tags if prediction.confidence > 0.2])
             metadata_written = output_path.exists()
             self.db.set_metadata_state(file_id, "written")
 
