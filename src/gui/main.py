@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
-    QSplitter,
     QMenu,
     QTextEdit,
     QVBoxLayout,
@@ -63,10 +62,10 @@ class StatCard(QFrame):
 
 class AspectPreviewLabel(QLabel):
     def __init__(self):
-        super().__init__("Select a photo")
+        super().__init__("选择照片")
         self.setAlignment(Qt.AlignCenter)
-        self.setMinimumHeight(320)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(260)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._source_pixmap: QPixmap | None = None
 
     def set_source_pixmap(self, pixmap: QPixmap | None):
@@ -100,18 +99,18 @@ class DetailsPanel(QFrame):
         self.tags.setMinimumHeight(180)
         self.metadata_details = QTextEdit()
         self.metadata_details.setReadOnly(True)
-        self.metadata_details.setMinimumHeight(220)
+        self.metadata_details.setMinimumHeight(180)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
         layout.addWidget(self.preview)
-        layout.addWidget(self._label_block("File", self.path))
-        layout.addWidget(self._label_block("Relative", self.relative_path))
-        layout.addWidget(self._label_block("Status", self.status))
-        layout.addWidget(self._label_block("Metadata", self.metadata_state))
-        layout.addWidget(self._label_block("Tags", self.tags))
-        layout.addWidget(self._label_block("Image Metadata", self.metadata_details))
+        layout.addWidget(self._label_block("文件", self.path))
+        layout.addWidget(self._label_block("相对路径", self.relative_path))
+        layout.addWidget(self._label_block("状态", self.status))
+        layout.addWidget(self._label_block("元数据", self.metadata_state))
+        layout.addWidget(self._label_block("标签", self.tags))
+        layout.addWidget(self._label_block("图片信息", self.metadata_details))
 
     def _label_block(self, title: str, widget: QWidget):
         container = QFrame()
@@ -127,7 +126,7 @@ class DetailsPanel(QFrame):
 
     def set_item(self, item, tags):
         if item is None:
-            self.preview.setText("Select a photo")
+            self.preview.setText("选择照片")
             self.preview.set_source_pixmap(None)
             self.path.setText("-")
             self.relative_path.setText("-")
@@ -152,13 +151,13 @@ class DetailsPanel(QFrame):
         if tags:
             text = "\n".join(f"{row['tag_name']}  ({row['confidence']:.2f})" for row in tags)
         else:
-            text = "No tags yet"
+            text = "暂无标签"
         self.tags.setPlainText(text)
         try:
             metadata = read_image_metadata(item.file_path)
             self.metadata_details.setPlainText(json.dumps(metadata, indent=2, ensure_ascii=False, default=str))
         except Exception as exc:
-            self.metadata_details.setPlainText(f"Failed to read metadata: {exc}")
+            self.metadata_details.setPlainText(f"读取元数据失败: {exc}")
 
 
 class MainWindow(QMainWindow):
@@ -184,7 +183,7 @@ class MainWindow(QMainWindow):
         self.library_id: int | None = None
         self.root_path: str = ""
         self._updating_library_list = False
-        self._search_mode = "Mixed"
+        self._search_mode = "混合"
 
         self._build_ui()
         self._bind_signals()
@@ -204,137 +203,174 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        outer = QVBoxLayout(central)
-        outer.setContentsMargins(18, 18, 18, 18)
-        outer.setSpacing(14)
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         self.search_mode = QComboBox()
-        self.search_mode.addItems(["Mixed", "Filename", "Semantic"])
+        self.search_mode.addItems(["混合", "文件名", "语义"])
         self.search_mode.currentTextChanged.connect(self._on_search_mode_changed)
 
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search by filename or meaning")
+        self.search_box.setPlaceholderText('文字搜图，例如"海边日落"、"多人合影"')
         self.search_box.returnPressed.connect(self._execute_search)
-        self.search_btn = QPushButton("Search")
+        self.search_btn = QPushButton("搜索")
         self.search_btn.clicked.connect(self._execute_search)
-        self.search_btn.setObjectName("SecondaryButton")
+        self.search_btn.setObjectName("PrimaryButton")
 
-        header = QFrame()
-        header.setObjectName("HeaderCard")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(18, 16, 18, 16)
-        header_layout.setSpacing(14)
+        left_panel = QFrame()
+        left_panel.setObjectName("Sidebar")
+        left_panel.setFixedWidth(280)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(16, 14, 16, 16)
+        left_layout.setSpacing(12)
 
-        title_block = QVBoxLayout()
-        self.title_label = QLabel("PhotoManager")
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(10)
+        self.brand_mark = QLabel("N")
+        self.brand_mark.setObjectName("BrandMark")
+        self.title_label = QLabel("AI 相册")
         self.title_label.setObjectName("AppTitle")
-        self.subtitle_label = QLabel("Automatic library ingestion, thumbnails, ExifTool metadata tags, and AI keywording")
-        self.subtitle_label.setObjectName("AppSubtitle")
-        title_block.addWidget(self.title_label)
-        title_block.addWidget(self.subtitle_label)
-        header_layout.addLayout(title_block, 1)
+        self.settings_btn = QPushButton("⚙")
+        self.settings_btn.setObjectName("IconButton")
+        self.settings_btn.setEnabled(False)
+        brand_row.addWidget(self.brand_mark)
+        brand_row.addWidget(self.title_label, 1)
+        brand_row.addWidget(self.settings_btn)
+        left_layout.addLayout(brand_row)
 
-        search_panel = QFrame()
-        search_panel.setObjectName("SearchPanel")
-        search_layout = QHBoxLayout(search_panel)
-        search_layout.setContentsMargins(10, 8, 10, 8)
-        search_layout.setSpacing(8)
-        search_layout.addWidget(self.search_box, 1)
-        search_layout.addWidget(self.search_mode)
-        search_layout.addWidget(self.search_btn)
-        header_layout.addWidget(search_panel, 2)
+        self.people_row = QFrame()
+        self.people_row.setObjectName("NavRow")
+        people_layout = QHBoxLayout(self.people_row)
+        people_layout.setContentsMargins(10, 8, 10, 8)
+        self.people_label = QLabel("人物")
+        self.people_count = QLabel("0")
+        self.people_count.setObjectName("MutedCount")
+        people_layout.addWidget(self.people_label, 1)
+        people_layout.addWidget(self.people_count)
+        left_layout.addWidget(self.people_row)
 
-        action_block = QHBoxLayout()
-        self.choose_btn = QPushButton("Add Library")
+        divider = QFrame()
+        divider.setObjectName("SidebarDivider")
+        divider.setFixedHeight(1)
+        left_layout.addWidget(divider)
+
+        group_header = QHBoxLayout()
+        group_title = QLabel("分组")
+        group_title.setObjectName("SectionLabel")
+        self.choose_btn = QPushButton("➕")
         self.choose_btn.clicked.connect(self.choose_library)
-        self.monitoring_tag = QLabel("Auto monitoring")
-        self.monitoring_tag.setObjectName("MonitoringTag")
-        action_block.addWidget(self.choose_btn)
-        action_block.addWidget(self.monitoring_tag)
+        self.choose_btn.setObjectName("SmallIconButton")
+        group_header.addWidget(group_title, 1)
+        group_header.addWidget(self.choose_btn)
+        left_layout.addLayout(group_header)
 
-        exiftool_block = QVBoxLayout()
-        exiftool_block.setSpacing(4)
+        self.library_list = QListWidget()
+        self.library_list.currentRowChanged.connect(self._select_library_by_row)
+        left_layout.addWidget(self.library_list, 1)
+
+        sidebar_footer = QFrame()
+        sidebar_footer.setObjectName("SidebarFooter")
+        footer_layout = QVBoxLayout(sidebar_footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(8)
+
+        self.status_label = QLabel("Idle")
+        self.status_label.setObjectName("StatusLabel")
+        self.status_label.setWordWrap(True)
         self.exiftool_status_label = QLabel("ExifTool: checking...")
         self.exiftool_status_label.setObjectName("ExifToolStatusTag")
         self.exiftool_status_label.setWordWrap(True)
         self.exiftool_path_label = QLabel("-")
         self.exiftool_path_label.setObjectName("ExifToolPathTag")
         self.exiftool_path_label.setWordWrap(True)
-        exiftool_block.addWidget(self.exiftool_status_label)
-        exiftool_block.addWidget(self.exiftool_path_label)
-        action_block.addLayout(exiftool_block)
-        header_layout.addLayout(action_block, 1)
+        footer_layout.addWidget(self.status_label)
+        footer_layout.addWidget(self.exiftool_status_label)
+        footer_layout.addWidget(self.exiftool_path_label)
+        left_layout.addWidget(sidebar_footer)
 
-        outer.addWidget(header)
+        self.library_label = QLabel("未选择相册")
+        self.library_label.setObjectName("LibraryPathLabel")
+        self.library_label.setWordWrap(True)
 
-        stats_row = QHBoxLayout()
-        stats_row.setSpacing(12)
+        self.excludes_box = QPlainTextEdit()
+        self.excludes_box.setPlaceholderText("One exclude path per line")
+        self.excludes_box.setMinimumHeight(82)
+        self.excludes_box.setMaximumHeight(110)
+
+        self.save_excludes_btn = QPushButton("保存排除")
+        self.save_excludes_btn.clicked.connect(self._save_excludes)
+        self.save_excludes_btn.setObjectName("SecondaryButton")
+
+        self.scan_now_btn = QPushButton("扫描")
+        self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
+        self.scan_now_btn.setObjectName("SecondaryButton")
+
+        self.delete_library_btn = QPushButton("删除")
+        self.delete_library_btn.clicked.connect(self._delete_current_library)
+        self.delete_library_btn.setObjectName("DangerButton")
+
+        library_tools = QFrame()
+        library_tools.setObjectName("LibraryTools")
+        tools_layout = QVBoxLayout(library_tools)
+        tools_layout.setContentsMargins(10, 10, 10, 10)
+        tools_layout.setSpacing(8)
+        tools_layout.addWidget(self.library_label)
+        tools_layout.addWidget(self.excludes_box)
+        tools_layout.addWidget(self.save_excludes_btn)
+        tool_buttons = QHBoxLayout()
+        tool_buttons.setSpacing(8)
+        tool_buttons.addWidget(self.scan_now_btn)
+        tool_buttons.addWidget(self.delete_library_btn)
+        tools_layout.addLayout(tool_buttons)
+        left_layout.addWidget(library_tools)
+
+        main_panel = QFrame()
+        main_panel.setObjectName("MainPanel")
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(26, 6, 22, 22)
+        main_layout.setSpacing(16)
+
+        top_bar = QFrame()
+        top_bar.setObjectName("TopBar")
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(10)
+        top_layout.addWidget(self.search_box, 1)
+        top_layout.addWidget(self.search_mode)
+        top_layout.addWidget(self.search_btn)
+        main_layout.addWidget(top_bar)
+
+        content_header = QHBoxLayout()
+        title_column = QVBoxLayout()
+        title_column.setSpacing(2)
+        self.album_title = QLabel("默认相册")
+        self.album_title.setObjectName("AlbumTitle")
+        self.album_subtitle = QLabel("0 张照片")
+        self.album_subtitle.setObjectName("AlbumSubtitle")
+        title_column.addWidget(self.album_title)
+        title_column.addWidget(self.album_subtitle)
+        content_header.addLayout(title_column, 1)
+
         self.total_card = StatCard("Total")
         self.pending_card = StatCard("Pending")
         self.analyzed_card = StatCard("Analyzed")
         self.error_card = StatCard("Errors")
         for card in (self.total_card, self.pending_card, self.analyzed_card, self.error_card):
-            stats_row.addWidget(card)
-        outer.addLayout(stats_row)
-
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-
-        left_panel = QFrame()
-        left_panel.setObjectName("SidePanel")
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(16, 16, 16, 16)
-        left_layout.setSpacing(12)
-
-        self.library_list = QListWidget()
-        self.library_list.currentRowChanged.connect(self._select_library_by_row)
-
-        self.library_label = QLabel("No library selected")
-        self.library_label.setWordWrap(True)
-        self.status_label = QLabel("Idle")
-        self.status_label.setWordWrap(True)
-
-        self.excludes_box = QPlainTextEdit()
-        self.excludes_box.setPlaceholderText("One exclude path per line")
-        self.excludes_box.setMinimumHeight(120)
-
-        self.save_excludes_btn = QPushButton("Save Excludes")
-        self.save_excludes_btn.clicked.connect(self._save_excludes)
-        self.save_excludes_btn.setObjectName("SecondaryButton")
-
-        self.scan_now_btn = QPushButton("Scan Now")
-        self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
-        self.scan_now_btn.setObjectName("SecondaryButton")
-
-        self.delete_library_btn = QPushButton("Delete Library")
-        self.delete_library_btn.clicked.connect(self._delete_current_library)
-        self.delete_library_btn.setObjectName("SecondaryButton")
-
-        left_layout.addWidget(QLabel("Libraries"))
-        left_layout.addWidget(self.library_list, 1)
-        left_layout.addWidget(QLabel("Current Library"))
-        left_layout.addWidget(self.library_label)
-        left_layout.addWidget(QLabel("Status"))
-        left_layout.addWidget(self.status_label)
-        left_layout.addWidget(QLabel("Exclude Paths"))
-        left_layout.addWidget(self.excludes_box)
-        left_layout.addWidget(self.save_excludes_btn)
-        action_row = QHBoxLayout()
-        action_row.addWidget(self.scan_now_btn)
-        action_row.addWidget(self.delete_library_btn)
-        left_layout.addLayout(action_row)
+            content_header.addWidget(card)
+        main_layout.addLayout(content_header)
 
         center_panel = QFrame()
         center_panel.setObjectName("CenterPanel")
         center_layout = QVBoxLayout(center_panel)
-        center_layout.setContentsMargins(16, 16, 16, 16)
-        center_layout.setSpacing(12)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
 
         self.view = QListView()
         self.view.setViewMode(QListView.IconMode)
         self.view.setResizeMode(QListView.Adjust)
         self.view.setMovement(QListView.Static)
-        self.view.setSpacing(14)
+        self.view.setSpacing(16)
         self.view.setWrapping(True)
         self.view.setIconSize(QSize(220, 220))
         self.view.setUniformItemSizes(True)
@@ -343,21 +379,16 @@ class MainWindow(QMainWindow):
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_gallery_context_menu)
         center_layout.addWidget(self.view)
+        main_layout.addWidget(center_panel, 1)
 
         right_panel = DetailsPanel()
-        right_panel.setMinimumWidth(380)
-        right_panel.setMaximumWidth(460)
-
-        splitter.addWidget(left_panel)
-        splitter.addWidget(center_panel)
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
-
-        outer.addWidget(splitter, 1)
-
+        right_panel.setFixedWidth(380)
+        right_panel.hide()
         self.details_panel = right_panel
+
+        root.addWidget(left_panel)
+        root.addWidget(main_panel, 1)
+        root.addWidget(right_panel)
 
     def _bind_signals(self):
         self.controller.libraries_changed.connect(self._on_libraries_changed)
@@ -373,129 +404,207 @@ class MainWindow(QMainWindow):
     def _apply_style(self):
         QApplication.setStyle("Fusion")
         palette = QPalette()
-        palette.setColor(QPalette.Window, QColor("#ede7dc"))
-        palette.setColor(QPalette.WindowText, QColor("#2d2924"))
-        palette.setColor(QPalette.Base, QColor("#f6f1e8"))
-        palette.setColor(QPalette.AlternateBase, QColor("#e3dccf"))
-        palette.setColor(QPalette.Text, QColor("#2d2924"))
-        palette.setColor(QPalette.Button, QColor("#efe5d2"))
-        palette.setColor(QPalette.ButtonText, QColor("#2d2924"))
-        palette.setColor(QPalette.Highlight, QColor("#357e72"))
+        palette.setColor(QPalette.Window, QColor("#f4f7fb"))
+        palette.setColor(QPalette.WindowText, QColor("#172033"))
+        palette.setColor(QPalette.Base, QColor("#ffffff"))
+        palette.setColor(QPalette.AlternateBase, QColor("#eef3fa"))
+        palette.setColor(QPalette.Text, QColor("#172033"))
+        palette.setColor(QPalette.Button, QColor("#edf3fb"))
+        palette.setColor(QPalette.ButtonText, QColor("#172033"))
+        palette.setColor(QPalette.Highlight, QColor("#2f73d9"))
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         QApplication.instance().setPalette(palette)
 
         self.setStyleSheet(
             """
             QWidget {
-                color: #2d2924;
+                color: #172033;
                 font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
                 font-size: 12px;
             }
             QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #e8dfd2, stop:0.52 #f1eadf, stop:1 #dbe7df);
+                background: #f4f7fb;
             }
-            QFrame#HeaderCard, QFrame#SidePanel, QFrame#CenterPanel, QFrame#DetailsPanel, QFrame#StatCard {
-                background: #f4eee3;
-                border: 1px solid #cfc5b6;
-                border-radius: 10px;
+            QFrame#Sidebar {
+                background: #f8fafd;
+                border-right: 1px solid #dce4ef;
             }
-            QFrame#HeaderCard {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #efe4d4, stop:0.45 #f8f1e6, stop:1 #d9e5dd);
-                border: 1px solid #c8baa6;
+            QFrame#MainPanel {
+                background: #f4f7fb;
             }
-            QFrame#SearchPanel,
             QFrame#CenterPanel {
-                background: #ebe3d7;
-                border: 1px solid #cbbfad;
-            }
-            QFrame#SidePanel {
-                background: #e5ddd0;
+                background: transparent;
+                border: none;
             }
             QFrame#DetailsPanel {
-                background: #eee7db;
+                background: #ffffff;
+                border-left: 1px solid #dce4ef;
+            }
+            QFrame#TopBar {
+                background: transparent;
             }
             QFrame#StatCard {
-                background: #e9e0d2;
+                background: transparent;
+                border: none;
+                border-radius: 0;
             }
             QFrame#DetailBlock {
-                background: #e9e1d5;
-                border: 1px solid #d1c6b8;
+                background: #f6f8fb;
+                border: 1px solid #e1e8f2;
                 border-radius: 8px;
                 padding: 8px;
             }
-            QLabel#AppTitle {
-                font-size: 26px;
-                font-weight: 750;
-                color: #29231d;
+            QFrame#NavRow {
+                background: transparent;
+                border-radius: 8px;
             }
-            QLabel#AppSubtitle {
-                color: #6f6558;
+            QFrame#NavRow:hover {
+                background: #eef4ff;
+            }
+            QFrame#SidebarDivider {
+                background: #dce4ef;
+                border: none;
+            }
+            QFrame#SidebarFooter {
+                background: transparent;
+                border: none;
+            }
+            QFrame#LibraryTools {
+                background: #ffffff;
+                border: 1px solid #e1e8f2;
+                border-radius: 8px;
+            }
+            QLabel#BrandMark {
+                background: #162033;
+                color: #ffffff;
+                border: 2px solid #2f73d9;
+                border-radius: 19px;
+                min-width: 38px;
+                max-width: 38px;
+                min-height: 38px;
+                max-height: 38px;
+                qproperty-alignment: AlignCenter;
+                font-size: 13px;
+                font-weight: 800;
+            }
+            QLabel#AppTitle {
+                font-size: 15px;
+                font-weight: 800;
+                color: #172033;
+            }
+            QLabel#AlbumTitle {
+                color: #121a2b;
+                font-size: 22px;
+                font-weight: 800;
+            }
+            QLabel#AlbumSubtitle {
+                color: #6f7d91;
                 font-size: 12px;
             }
-            QLabel#MonitoringTag {
-                color: #214f49;
-                background: #d6e8df;
-                border: 1px solid #a9cbbd;
-                border-radius: 12px;
-                padding: 8px 14px;
-                font-size: 11px;
+            QLabel#SectionLabel {
+                color: #6f7d91;
+                font-size: 12px;
                 font-weight: 700;
             }
+            QLabel#MutedCount {
+                color: #7d8da3;
+                font-weight: 700;
+            }
+            QLabel#StatusLabel {
+                color: #64748b;
+                font-size: 11px;
+            }
+            QLabel#LibraryPathLabel {
+                color: #475569;
+                font-size: 11px;
+            }
             QLabel#ExifToolStatusTag {
-                color: #59401a;
-                background: #ead8b7;
-                border: 1px solid #c9ac72;
-                border-radius: 12px;
-                padding: 8px 14px;
+                color: #245f45;
+                background: #e7f6ee;
+                border: 1px solid #bce4cd;
+                border-radius: 8px;
+                padding: 7px 10px;
                 font-size: 11px;
                 font-weight: 700;
             }
             QLabel#ExifToolPathTag {
-                color: #6f6558;
+                color: #7d8da3;
                 font-size: 11px;
                 font-family: Consolas, monospace;
-                opacity: 0.95;
             }
             QLabel#StatTitle, QLabel#DetailHeading {
-                color: #716658;
+                color: #7d8da3;
                 font-size: 11px;
                 text-transform: uppercase;
-                letter-spacing: 1px;
             }
             QLabel#StatValue {
-                color: #2b251f;
-                font-size: 28px;
-                font-weight: 700;
+                color: #172033;
+                font-size: 18px;
+                font-weight: 800;
             }
             QPushButton {
-                background: #357e72;
+                background: #eef4ff;
+                color: #24456f;
+                border: 1px solid #cfe0f5;
+                border-radius: 8px;
+                padding: 9px 14px;
+                font-weight: 700;
+            }
+            QPushButton:hover { background: #e4efff; }
+            QPushButton:pressed { background: #d9e9ff; }
+            QPushButton:disabled { background: #edf1f6; color: #94a3b8; border-color: #e1e8f2; }
+            QPushButton#PrimaryButton {
+                background: #2f73d9;
                 color: #ffffff;
                 border: none;
                 border-radius: 8px;
-                padding: 10px 16px;
-                font-weight: 600;
+                min-width: 78px;
             }
-            QPushButton:hover { background: #2b6c62; }
-            QPushButton:pressed { background: #23584f; }
-            QPushButton:disabled { background: #cfc5b6; color: #8b8175; }
+            QPushButton#PrimaryButton:hover { background: #2664c2; }
             QPushButton#SecondaryButton {
-                background: #e7d8bc;
-                color: #342d25;
-                border: 1px solid #c5af82;
+                background: #ffffff;
+                color: #334155;
+                border: 1px solid #d8e2ee;
             }
-            QPushButton#SecondaryButton:hover { background: #dec999; }
+            QPushButton#SecondaryButton:hover { background: #f2f6fb; }
+            QPushButton#DangerButton {
+                background: #fff0f0;
+                color: #c33131;
+                border: 1px solid #ffd2d2;
+            }
+            QPushButton#DangerButton:hover {
+                background: #ffe4e4;
+            }
+            QPushButton#IconButton, QPushButton#SmallIconButton {
+                background: transparent;
+                border: none;
+                color: #59677c;
+                padding: 4px;
+                min-width: 28px;
+                max-width: 50px;
+                min-height: 28px;
+                max-height: 50px;
+                font-weight: 800;
+            }
             QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {
-                background: #f7f1e7;
-                color: #2d2924;
-                border: 1px solid #c8bbab;
+                background: #ffffff;
+                color: #172033;
+                border: 1px solid #d8e2ee;
                 border-radius: 8px;
                 padding: 10px 12px;
-                selection-background-color: #357e72;
+                selection-background-color: #2f73d9;
                 selection-color: #ffffff;
             }
             QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
-                border: 1px solid #357e72;
-                background: #fbf5ea;
+                border: 1px solid #2f73d9;
+                background: #ffffff;
+            }
+            QLineEdit {
+                min-height: 24px;
+                font-size: 13px;
+            }
+            QComboBox {
+                min-width: 112px;
             }
             QComboBox::drop-down {
                 border: none;
@@ -506,27 +615,43 @@ class MainWindow(QMainWindow):
                 border: none;
                 outline: 0;
             }
-            QListView::item, QListWidget::item {
-                background: #f2eadf;
-                border: 1px solid #d5c8b8;
+            QListWidget::item {
+                background: transparent;
+                border: 1px solid transparent;
                 border-radius: 8px;
-                padding: 8px;
-                margin: 4px;
-                color: #302a24;
+                padding: 10px;
+                margin: 2px 0;
+                color: #475569;
             }
-            QListView::item:hover, QListWidget::item:hover {
-                background: #eadcc7;
-                border: 1px solid #bd9f66;
+            QListWidget::item:hover {
+                background: #eef4ff;
             }
-            QListView::item:selected, QListWidget::item:selected {
-                border: 1px solid #357e72;
-                background: #cfe2d9;
-                color: #1f4640;
+            QListWidget::item:selected {
+                background: #dceaff;
+                border: 1px solid #c3d8f6;
+                color: #1f4f93;
+                font-weight: 700;
+            }
+            QListView::item {
+                background: #ffffff;
+                border: 1px solid #dfe7f1;
+                border-radius: 8px;
+                padding: 7px;
+                margin: 3px;
+                color: #172033;
+            }
+            QListView::item:hover {
+                background: #f6faff;
+                border: 1px solid #bcd3f4;
+            }
+            QListView::item:selected {
+                background: #eef4ff;
+                border: 2px solid #2f73d9;
             }
             QMenu {
-                background: #f4eee3;
-                color: #2d2924;
-                border: 1px solid #c8bbab;
+                background: #ffffff;
+                color: #172033;
+                border: 1px solid #d8e2ee;
                 border-radius: 8px;
                 padding: 6px;
             }
@@ -535,11 +660,20 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
             }
             QMenu::item:selected {
-                background: #cfe2d9;
-                color: #1f4640;
+                background: #eef4ff;
+                color: #1f4f93;
             }
-            QSplitter::handle {
-                background: #cbc0b1;
+            QScrollBar:vertical {
+                background: transparent;
+                width: 10px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c9d6e6;
+                border-radius: 5px;
+                min-height: 32px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
             }
             """
         )
@@ -655,11 +789,11 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            if self._search_mode == "Filename":
+            if self._search_mode in ("Filename", "文件名"):
                 rows = self.db.search_files_by_name(self.library_id, query, limit=200)
                 self.gallery_model.set_search_results(self.library_id, rows)
             else:
-                mode = "mixed" if self._search_mode == "Mixed" else "semantic"
+                mode = "mixed" if self._search_mode in ("Mixed", "混合") else "semantic"
                 file_ids, score_map, _source_map = self.search_service.search(self.library_id, query, mode=mode, limit=200)
                 rows = self.db.list_files_by_ids(self.library_id, file_ids)
                 self.gallery_model.set_search_results(self.library_id, rows, score_map=score_map)
@@ -673,12 +807,17 @@ class MainWindow(QMainWindow):
             self.pending_card.set_value("0")
             self.analyzed_card.set_value("0")
             self.error_card.set_value("0")
+            self.people_count.setText("0")
+            self.album_subtitle.setText("0 张照片")
             return
         stats = self.db.get_library_stats(self.library_id)
         self.total_card.set_value(str(stats["total_files"] or 0))
         self.pending_card.set_value(str(stats["pending_files"] or 0))
         self.analyzed_card.set_value(str(stats["analyzed_files"] or 0))
         self.error_card.set_value(str(stats["error_files"] or 0))
+        total_files = int(stats["total_files"] or 0)
+        self.people_count.setText(str(total_files))
+        self.album_subtitle.setText(f"{total_files} 张照片")
 
     def _selected_library_id(self):
         item = self.library_list.currentItem()
@@ -718,9 +857,12 @@ class MainWindow(QMainWindow):
         if item is None:
             self.library_id = None
             self.root_path = ""
-            self.library_label.setText("No library selected")
+            self.library_label.setText("未选择相册")
+            self.album_title.setText("默认相册")
+            self.album_subtitle.setText("0 张照片")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
+            self.details_panel.hide()
             return
         self._refresh_stats()
         self._update_library_action_state()
@@ -738,7 +880,9 @@ class MainWindow(QMainWindow):
         self.library_list.clear()
         for row in libraries:
             label = str(row["root_path"])
-            item = QListWidgetItem(label)
+            display_name = Path(label).name or label
+            item = QListWidgetItem(f"▣  {display_name}")
+            item.setToolTip(label)
             item.setData(Qt.UserRole, int(row["id"]))
             self.library_list.addItem(item)
         if current_id is not None:
@@ -750,17 +894,23 @@ class MainWindow(QMainWindow):
                 if self.library_list.count() == 0:
                     self.library_id = None
                     self.root_path = ""
-                    self.library_label.setText("No library selected")
+                    self.library_label.setText("未选择相册")
+                    self.album_title.setText("默认相册")
+                    self.album_subtitle.setText("0 张照片")
                     self.view.setModel(None)
                     self.details_panel.set_item(None, [])
+                    self.details_panel.hide()
                     self._refresh_stats()
         self._updating_library_list = False
         if not libraries:
             self.library_id = None
             self.root_path = ""
-            self.library_label.setText("No library selected")
+            self.library_label.setText("未选择相册")
+            self.album_title.setText("默认相册")
+            self.album_subtitle.setText("0 张照片")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
+            self.details_panel.hide()
             self._refresh_stats()
         self._update_library_action_state()
 
@@ -768,12 +918,15 @@ class MainWindow(QMainWindow):
         self.library_id = library_id
         self.root_path = root_path
         self.library_label.setText(root_path)
+        self.album_title.setText(Path(root_path).name or "默认相册")
         if hasattr(self, "gallery_model"):
             self.gallery_model.shutdown()
         self.gallery_model = GalleryModel(self.db, library_id)
         self.view.setModel(self.gallery_model)
         self.view.setIconSize(self.gallery_model._placeholder.size())
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
+        self.details_panel.set_item(None, [])
+        self.details_panel.hide()
         self.search_box.blockSignals(True)
         self.search_box.clear()
         self.search_box.blockSignals(False)
@@ -799,13 +952,16 @@ class MainWindow(QMainWindow):
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex):
         if not current.isValid():
             self.details_panel.set_item(None, [])
+            self.details_panel.hide()
             return
         item = self.gallery_model.item(current.row())
         if item is None:
             self.details_panel.set_item(None, [])
+            self.details_panel.hide()
             return
         tags = self.db.list_tags_for_file(item.file_id)
         self.details_panel.set_item(item, tags)
+        self.details_panel.show()
 
     def _save_excludes(self):
         if self.library_id is None:
