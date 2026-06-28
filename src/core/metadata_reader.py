@@ -51,7 +51,11 @@ def decode_xp_text(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return value
+        if "\x00" in value:
+            cleaned = value.replace("\x00", "").strip()
+            if cleaned:
+                return cleaned
+        return value.strip()
     if isinstance(value, (bytes, bytearray)):
         raw = bytes(value)
     elif isinstance(value, (list, tuple)):
@@ -62,17 +66,38 @@ def decode_xp_text(value: Any) -> str:
     else:
         raw = str(value).encode("utf-8", errors="ignore")
 
-    try:
-        return raw.decode("utf-16le", errors="ignore").rstrip("\x00")
-    except Exception:
-        return raw.decode("utf-8", errors="ignore").rstrip("\x00")
+    candidates = []
+    if raw.startswith(b"\xff\xfe") or b"\x00" in raw:
+        candidates.extend(
+            [
+                raw.decode("utf-16le", errors="ignore"),
+                raw.decode("utf-16", errors="ignore"),
+            ]
+        )
+    candidates.extend(
+        [
+            raw.decode("utf-8", errors="ignore"),
+            raw.decode("latin1", errors="ignore"),
+        ]
+    )
+
+    for candidate in candidates:
+        cleaned = candidate.replace("\x00", "").strip()
+        if cleaned:
+            return cleaned
+
+    return raw.decode("utf-8", errors="ignore").replace("\x00", "").strip()
 
 
 def extract_keywords(metadata: dict[str, Any]) -> list[str]:
-    candidates = []
-    for key in ("XPKeywords", "Keywords", "Subject", "dc:subject"):
+    candidates: list[Any] = []
+    for key in ["Keywords"]:
         if key in metadata and metadata[key]:
-            candidates.append(metadata[key])
+            value = metadata[key]
+            if isinstance(value, (list, tuple, set)):
+                candidates.extend(value)
+            else:
+                candidates.append(value)
 
     for value in candidates:
         if isinstance(value, str):
@@ -90,6 +115,13 @@ def extract_keywords(metadata: dict[str, Any]) -> list[str]:
             if "," in text:
                 return [part.strip() for part in text.split(",") if part.strip()]
             return [text]
+
+        if isinstance(value, (list, tuple, set)):
+            decoded_items = [decode_xp_text(item).strip() for item in value]
+            decoded_items = [item for item in decoded_items if item]
+            if decoded_items:
+                return decoded_items
+            continue
 
         decoded = decode_xp_text(value).strip()
         if decoded:

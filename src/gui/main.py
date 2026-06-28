@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 
-from PySide6.QtCore import QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl
+from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -375,9 +375,10 @@ class MainWindow(QMainWindow):
         self.view.setIconSize(QSize(220, 220))
         self.view.setUniformItemSizes(True)
         self.view.setWordWrap(True)
-        self.view.setSelectionMode(QListView.SingleSelection)
+        self.view.setSelectionMode(QListView.ExtendedSelection)
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_gallery_context_menu)
+        self.view.viewport().installEventFilter(self)
         center_layout.addWidget(self.view)
         main_layout.addWidget(center_panel, 1)
 
@@ -681,6 +682,17 @@ class MainWindow(QMainWindow):
     def _set_status(self, text: str):
         self.status_label.setText(text)
 
+    def eventFilter(self, watched, event):
+        if hasattr(self, "view") and watched is self.view.viewport() and event.type() == QEvent.MouseButtonPress:
+            if self.view.indexAt(event.position().toPoint()).isValid():
+                return super().eventFilter(watched, event)
+            if event.button() in (Qt.LeftButton, Qt.RightButton):
+                self.view.clearSelection()
+                self.view.setCurrentIndex(QModelIndex())
+                self.details_panel.set_item(None, [])
+                self.details_panel.hide()
+        return super().eventFilter(watched, event)
+
     def _selected_gallery_index(self, view_index: QModelIndex | None = None):
         if view_index is not None and view_index.isValid():
             return view_index
@@ -692,34 +704,53 @@ class MainWindow(QMainWindow):
             return None
         return self.gallery_model.item(index.row())
 
+    def _selected_gallery_items(self) -> list:
+        if not hasattr(self, "gallery_model") or self.view.selectionModel() is None:
+            return []
+        rows = sorted({index.row() for index in self.view.selectionModel().selectedIndexes() if index.isValid()})
+        return [item for row in rows if (item := self.gallery_model.item(row)) is not None]
+
     def _show_gallery_context_menu(self, position):
         if not hasattr(self, "gallery_model"):
             return
         view_index = self.view.indexAt(position)
         if not view_index.isValid():
             return
-        self.view.setCurrentIndex(view_index)
-        item = self._selected_gallery_item(view_index)
-        if item is None:
+
+        selection = self.view.selectionModel()
+        if selection is not None and not selection.isSelected(view_index):
+            selection.select(view_index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+            self.view.setCurrentIndex(view_index)
+        elif self.view.currentIndex() != view_index:
+            self.view.setCurrentIndex(view_index)
+
+        items = self._selected_gallery_items()
+        if not items:
             return
+        primary_item = self._selected_gallery_item(view_index) or items[0]
+        multi = len(items) > 1
 
         menu = QMenu(self)
-        open_action = menu.addAction("Open")
-        reveal_action = menu.addAction("Show in Folder")
-        copy_file_action = menu.addAction("Copy File")
-        copy_path_action = menu.addAction("Copy Path")
+        open_action = menu.addAction("打开选中" if multi else "打开")
+        reveal_action = menu.addAction("在文件夹中显示" if multi else "显示所在文件夹")
+        copy_file_action = menu.addAction(f"复制 {len(items)} 个文件" if multi else "复制文件")
+        copy_path_action = menu.addAction(f"复制 {len(items)} 个路径" if multi else "复制路径")
         chosen = menu.exec(self.view.viewport().mapToGlobal(position))
         if chosen == open_action:
-            self._open_file(item.file_path)
+            self._open_files([item.file_path for item in items])
         elif chosen == reveal_action:
-            self._show_in_folder(item.file_path)
+            self._show_in_folder(primary_item.file_path)
         elif chosen == copy_file_action:
-            self._copy_file_to_clipboard(item.file_path)
+            self._copy_files_to_clipboard([item.file_path for item in items])
         elif chosen == copy_path_action:
-            self._copy_path_to_clipboard(item.file_path)
+            self._copy_paths_to_clipboard([item.file_path for item in items])
 
     def _open_file(self, file_path: str):
         QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+
+    def _open_files(self, file_paths: list[str]):
+        for file_path in file_paths:
+            self._open_file(file_path)
 
     def _show_in_folder(self, file_path: str):
         path = Path(file_path)
@@ -732,13 +763,19 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def _copy_file_to_clipboard(self, file_path: str):
+        self._copy_files_to_clipboard([file_path])
+
+    def _copy_files_to_clipboard(self, file_paths: list[str]):
         mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(file_path)])
-        mime.setText(file_path)
+        mime.setUrls([QUrl.fromLocalFile(file_path) for file_path in file_paths])
+        mime.setText("\n".join(file_paths))
         QApplication.clipboard().setMimeData(mime)
 
     def _copy_path_to_clipboard(self, file_path: str):
-        QApplication.clipboard().setText(file_path)
+        self._copy_paths_to_clipboard([file_path])
+
+    def _copy_paths_to_clipboard(self, file_paths: list[str]):
+        QApplication.clipboard().setText("\n".join(file_paths))
 
     def _update_library_action_state(self):
         has_library = self.library_id is not None
