@@ -3,15 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from fractions import Fraction
-import json
 import logging
 from pathlib import Path
 from typing import Any
 from .exiftool_manager import ExifToolManager
 from exiftool import ExifToolHelper
 from PIL import ExifTags, Image
-
-from .image_processing import load_image_for_processing
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +41,85 @@ def _seq_value(value: Any) -> Any:
         if isinstance(seq, dict):
             return seq.get("li") or seq.get("LI") or seq.get("Li")
         return seq
+    return value
+
+
+def _find_metadata_value(metadata: Any, keys: set[str]) -> Any:
+    if isinstance(metadata, dict):
+        for key, value in metadata.items():
+            if key in keys and value not in (None, "", [], (), {}):
+                return value
+            found = _find_metadata_value(value, keys)
+            if found not in (None, "", [], (), {}):
+                return found
+    elif isinstance(metadata, (list, tuple, set)):
+        for item in metadata:
+            found = _find_metadata_value(item, keys)
+            if found not in (None, "", [], (), {}):
+                return found
+    return None
+
+
+def _to_readable_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+        except Exception:
+            pass
+        delimiters = (";", ",")
+        for delimiter in delimiters:
+            if delimiter in text:
+                return [part.strip() for part in text.split(delimiter) if part.strip()]
+        return [text]
+    if isinstance(value, (list, tuple, set)):
+        if len(value) == 1:
+            only_item = next(iter(value))
+            if isinstance(only_item, str):
+                return _to_readable_list(only_item)
+        result: list[str] = []
+        for item in value:
+            decoded = decode_xp_text(item).strip()
+            if decoded:
+                result.append(decoded)
+        return result
+    decoded = decode_xp_text(value).strip()
+    return [decoded] if decoded else []
+
+
+def _to_display_value(value: Any, *, key: str | None = None) -> Any:
+    if value is None:
+        return None
+    if key in {"Keywords", "XPKeywords", "Subject"}:
+        return _to_readable_list(value)
+    if key in {"FNumber", "FocalLength", "ExposureTime", "Megapixels", "GPSLatitude", "GPSLongitude", "GPSAltitude"}:
+        return _fraction_to_float(value)
+    if key in {"ImageWidth", "ImageHeight", "ISOSpeedRatings"}:
+        try:
+            return int(_seq_value(value))
+        except Exception:
+            try:
+                return int(value)
+            except Exception:
+                return decode_xp_text(value).strip() or str(value)
+    if key in {"DateTimeOriginal", "CreateDate", "ModifyDate", "GPSDateTime"}:
+        try:
+            return _parse_iso8601(str(value)).strftime("%Y:%m:%d %H:%M:%S")
+        except Exception:
+            return decode_xp_text(value).strip() or str(value)
+    if isinstance(value, (list, tuple, set)):
+        readable = _to_readable_list(value)
+        return readable if readable else [decode_xp_text(item).strip() for item in value]
+    if isinstance(value, dict):
+        return {k: _to_display_value(v, key=k) for k, v in value.items()}
+    if isinstance(value, str):
+        return decode_xp_text(value).strip()
     return value
 
 
@@ -90,62 +166,27 @@ def decode_xp_text(value: Any) -> str:
 
 
 def extract_keywords(metadata: dict[str, Any]) -> list[str]:
-    candidates: list[Any] = []
-    for key in ["Keywords"]:
-        if key in metadata and metadata[key]:
-            value = metadata[key]
-            if isinstance(value, (list, tuple, set)):
-                candidates.extend(value)
-            else:
-                candidates.append(value)
-
-    for value in candidates:
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                continue
-            try:
-                parsed = json.loads(text)
-                if isinstance(parsed, list):
-                    return [str(item).strip() for item in parsed if str(item).strip()]
-            except Exception:
-                pass
-            if ";" in text:
-                return [part.strip() for part in text.split(";") if part.strip()]
-            if "," in text:
-                return [part.strip() for part in text.split(",") if part.strip()]
-            return [text]
-
-        if isinstance(value, (list, tuple, set)):
-            decoded_items = [decode_xp_text(item).strip() for item in value]
-            decoded_items = [item for item in decoded_items if item]
-            if decoded_items:
-                return decoded_items
-            continue
-
-        decoded = decode_xp_text(value).strip()
-        if decoded:
-            if ";" in decoded:
-                return [part.strip() for part in decoded.split(";") if part.strip()]
-            if "," in decoded:
-                return [part.strip() for part in decoded.split(",") if part.strip()]
-            return [decoded]
-
-    return []
+    value = _find_metadata_value(metadata, {"Keywords", "XPKeywords", "Subject", "dc:subject"})
+    if value is None:
+        return []
+    return _to_readable_list(value)
 
 
 def extract_title(metadata: dict[str, Any]) -> str | None:
-    for key in ("ImageDescription", "Title", "dc:title"):
-        value = metadata.get(key)
-        if value:
-            if isinstance(value, str):
-                text = value.strip()
-                if text:
-                    return text
-            else:
-                decoded = decode_xp_text(value).strip()
-                if decoded:
-                    return decoded
+    value = _find_metadata_value(metadata, {"ImageDescription", "Title", "XPTitle", "dc:title"})
+    if value:
+        if isinstance(value, (list, tuple, set)):
+            readable = _to_readable_list(value)
+            if readable:
+                return readable[0]
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+        else:
+            decoded = decode_xp_text(value).strip()
+            if decoded:
+                return decoded
     return None
 
 
@@ -204,30 +245,119 @@ def get_img_exif(image: Image.Image) -> dict[str, Any]:
     return dict(result_dict)
 
 def read_image_metadata_exiftool(image_path: str | Path) -> dict[str, Any]:
-        result_dict: dict[str, Any] = defaultdict(str)
-        
-        image_path_str = str(image_path)
-        with ExifToolHelper(executable=str(ExifToolManager().ensure_exiftool()), encoding="utf-8") as et:
-            try:
-                metadata_list = et.get_metadata(image_path_str)
-                if not metadata_list:
-                    return result_dict
-                
-                raw_metadata = metadata_list[0]
-                
-                for key, val in raw_metadata.items():
-                    if ":" in key:
-                        tag_name = key.split(":", 1)[1]
-                    else:
-                        tag_name = key
-                    
-                    result_dict[tag_name] = val
-                    
-            except Exception as e:
-                print(f"Failed to read image metadata for {image_path}: {e}")
-                logger.exception("Failed to read image metadata for %s", image_path)
-                
-        return dict(result_dict)
+    image_path_str = str(image_path)
+    sections: dict[str, dict[str, Any]] = {
+        "file": {},
+        "camera": {},
+        "capture": {},
+        "exposure": {},
+        "lens": {},
+        "location": {},
+        "text": {},
+        "technical": {},
+    }
+
+    file_fields = {
+        "FileName": ("file", "FileName"),
+        "Directory": ("file", "Directory"),
+        "FileType": ("file", "FileType"),
+        "FileTypeExtension": ("file", "FileTypeExtension"),
+        "MIMEType": ("file", "MIMEType"),
+        "ImageWidth": ("file", "Width"),
+        "ImageHeight": ("file", "Height"),
+        "ImageSize": ("file", "ImageSize"),
+        "Megapixels": ("file", "Megapixels"),
+        "Orientation": ("technical", "Orientation"),
+        "Software": ("technical", "Software"),
+        "Artist": ("technical", "Artist"),
+        "Copyright": ("technical", "Copyright"),
+    }
+    camera_fields = {
+        "Make": ("camera", "Make"),
+        "Model": ("camera", "Model"),
+    }
+    lens_fields = {
+        "LensModel": ("lens", "LensModel"),
+        "LensInfo": ("lens", "LensInfo"),
+    }
+    capture_fields = {
+        "DateTimeOriginal": ("capture", "DateTimeOriginal"),
+        "CreateDate": ("capture", "CreateDate"),
+        "ModifyDate": ("capture", "ModifyDate"),
+    }
+    exposure_fields = {
+        "ExposureTime": ("exposure", "ExposureTime"),
+        "FNumber": ("exposure", "FNumber"),
+        "ISO": ("exposure", "ISO"),
+        "ISOSpeedRatings": ("exposure", "ISOSpeedRatings"),
+        "FocalLength": ("exposure", "FocalLength"),
+        "ExposureProgram": ("exposure", "ExposureProgram"),
+        "MeteringMode": ("exposure", "MeteringMode"),
+        "WhiteBalance": ("exposure", "WhiteBalance"),
+        "Flash": ("exposure", "Flash"),
+    }
+    location_fields = {
+        "GPSLatitude": ("location", "Latitude"),
+        "GPSLongitude": ("location", "Longitude"),
+        "GPSAltitude": ("location", "Altitude"),
+        "GPSPosition": ("location", "Position"),
+        "GPSCoordinates": ("location", "Coordinates"),
+        "GPSDateTime": ("location", "GPSDateTime"),
+        "GPSLatitudeRef": ("location", "LatitudeRef"),
+        "GPSLongitudeRef": ("location", "LongitudeRef"),
+    }
+    text_fields = {
+        "Title": ("text", "Title"),
+        "ImageDescription": ("text", "Description"),
+        "XPTitle": ("text", "XPTitle"),
+        "XPKeywords": ("text", "XPKeywords"),
+        "Keywords": ("text", "Keywords"),
+        "Subject": ("text", "Subject"),
+        "Comment": ("text", "Comment"),
+        "UserComment": ("text", "UserComment"),
+        "Description": ("text", "DescriptionText"),
+    }
+
+    mapped_fields = {
+        **file_fields,
+        **camera_fields,
+        **lens_fields,
+        **capture_fields,
+        **exposure_fields,
+        **location_fields,
+        **text_fields,
+    }
+
+    with ExifToolHelper(executable=str(ExifToolManager().ensure_exiftool()), encoding="utf-8") as et:
+        try:
+            metadata_list = et.get_metadata(image_path_str)
+            if not metadata_list:
+                return {}
+
+            raw_metadata = metadata_list[0]
+            for key, value in raw_metadata.items():
+                stripped_key = key.split(":", 1)[1] if ":" in key else key
+                mapping = mapped_fields.get(stripped_key)
+                if mapping is None:
+                    continue
+                section_name, target_key = mapping
+                sections[section_name][target_key] = _to_display_value(value, key=stripped_key)
+
+            keywords = extract_keywords(raw_metadata)
+            if keywords:
+                sections["text"]["Keywords"] = keywords
+
+            title = extract_title(raw_metadata)
+            if title:
+                sections["text"]["Title"] = title
+
+            structured = {name: data for name, data in sections.items() if data}
+            return structured
+        except Exception as e:
+            print(f"Failed to read image metadata for {image_path}: {e}")
+            logger.exception("Failed to read image metadata for %s", image_path)
+
+    return {}
 def read_image_metadata(image_path: str | Path) -> dict[str, Any]:
     try:
         logger.debug("Reading image metadata path=%s", image_path)

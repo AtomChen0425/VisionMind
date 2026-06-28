@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
 import logging
 import sys
 
@@ -26,6 +25,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QTextEdit,
     QVBoxLayout,
+    QTreeWidget,
+    QTreeWidgetItem,
     QWidget,
 )
 
@@ -85,6 +86,17 @@ class AspectPreviewLabel(QLabel):
 
 
 class DetailsPanel(QFrame):
+    SECTION_LABELS = {
+        "file": "文件",
+        "camera": "相机",
+        "capture": "拍摄",
+        "exposure": "曝光",
+        "lens": "镜头",
+        "location": "位置",
+        "text": "文本",
+        "technical": "技术",
+    }
+
     def __init__(self):
         super().__init__()
         self.setObjectName("DetailsPanel")
@@ -97,9 +109,14 @@ class DetailsPanel(QFrame):
         self.tags = QTextEdit()
         self.tags.setReadOnly(True)
         self.tags.setMinimumHeight(180)
-        self.metadata_details = QTextEdit()
-        self.metadata_details.setReadOnly(True)
-        self.metadata_details.setMinimumHeight(180)
+        self.metadata_tree = QTreeWidget()
+        self.metadata_tree.setColumnCount(2)
+        self.metadata_tree.setHeaderLabels(["字段", "值"])
+        self.metadata_tree.setRootIsDecorated(False)
+        self.metadata_tree.setAlternatingRowColors(True)
+        self.metadata_tree.setIndentation(18)
+        self.metadata_tree.header().setStretchLastSection(True)
+        self.metadata_tree.setMinimumHeight(200)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -110,7 +127,7 @@ class DetailsPanel(QFrame):
         layout.addWidget(self._label_block("状态", self.status))
         layout.addWidget(self._label_block("元数据", self.metadata_state))
         layout.addWidget(self._label_block("标签", self.tags))
-        layout.addWidget(self._label_block("图片信息", self.metadata_details))
+        layout.addWidget(self._label_block("图片信息", self.metadata_tree))
 
     def _label_block(self, title: str, widget: QWidget):
         container = QFrame()
@@ -133,7 +150,8 @@ class DetailsPanel(QFrame):
             self.status.setText("-")
             self.metadata_state.setText("-")
             self.tags.setPlainText("")
-            self.metadata_details.setPlainText("")
+            self.metadata_tree.clear()
+            self.metadata_tree.addTopLevelItem(QTreeWidgetItem(["选择照片后显示结构化元数据", ""]))
             return
 
         pixmap = item.thumbnail or QPixmap(320, 320)
@@ -155,9 +173,49 @@ class DetailsPanel(QFrame):
         self.tags.setPlainText(text)
         try:
             metadata = read_image_metadata(item.file_path)
-            self.metadata_details.setPlainText(json.dumps(metadata, indent=2, ensure_ascii=False, default=str))
+            self._set_metadata_tree(metadata)
         except Exception as exc:
-            self.metadata_details.setPlainText(f"读取元数据失败: {exc}")
+            self.metadata_tree.clear()
+            error_item = QTreeWidgetItem(["错误", f"读取元数据失败: {exc}"])
+            self.metadata_tree.addTopLevelItem(error_item)
+
+    def _set_metadata_tree(self, metadata: dict):
+        self.metadata_tree.clear()
+        if not metadata:
+            self.metadata_tree.addTopLevelItem(QTreeWidgetItem(["暂无可显示的元数据", ""]))
+            return
+
+        for section_name, fields in metadata.items():
+            label = self.SECTION_LABELS.get(section_name, section_name)
+            section_item = QTreeWidgetItem([label, ""])
+            section_font = section_item.font(0)
+            section_font.setBold(True)
+            section_item.setFont(0, section_font)
+            section_item.setFirstColumnSpanned(True)
+            section_item.setExpanded(True)
+
+            if isinstance(fields, dict):
+                for key, value in fields.items():
+                    child = QTreeWidgetItem([str(key), self._format_metadata_value(value)])
+                    section_item.addChild(child)
+            else:
+                section_item.addChild(QTreeWidgetItem(["值", self._format_metadata_value(fields)]))
+
+            self.metadata_tree.addTopLevelItem(section_item)
+
+        self.metadata_tree.expandAll()
+
+    def _format_metadata_value(self, value):
+        if value is None:
+            return "-"
+        if isinstance(value, list):
+            return ", ".join(self._format_metadata_value(item) for item in value if item not in (None, ""))
+        if isinstance(value, dict):
+            parts = []
+            for key, item in value.items():
+                parts.append(f"{key}: {self._format_metadata_value(item)}")
+            return "; ".join(parts)
+        return str(value)
 
 
 class MainWindow(QMainWindow):
@@ -599,6 +657,28 @@ class MainWindow(QMainWindow):
             QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
                 border: 1px solid #2f73d9;
                 background: #ffffff;
+            }
+            QTreeWidget {
+                background: #ffffff;
+                color: #172033;
+                border: 1px solid #d8e2ee;
+                border-radius: 8px;
+                alternate-background-color: #f5f9ff;
+            }
+            QTreeWidget::item {
+                padding: 6px 8px;
+            }
+            QTreeWidget::item:selected {
+                background: #dceaff;
+                color: #1f4f93;
+            }
+            QHeaderView::section {
+                background: #f1f5fa;
+                color: #5f7189;
+                padding: 8px 10px;
+                border: none;
+                border-bottom: 1px solid #d8e2ee;
+                font-weight: 700;
             }
             QLineEdit {
                 min-height: 24px;
