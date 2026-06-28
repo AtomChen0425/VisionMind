@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import logging
 import numpy as np
+
+from .image_processing import load_image_for_processing
+from .model_cache import configure_model_cache
 
 
 DEFAULT_LABELS = (
@@ -36,7 +40,8 @@ DEFAULT_LABELS = (
     "building"
 )
 
-
+PROMPT_TEMPLATE = "a photo of a {}"
+logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class TagPrediction:
     tag_name: str
@@ -61,6 +66,7 @@ class OpenClipAnalyzer:
         self.model_name = model_name
         self.pretrained = pretrained
         self._device_name = device
+        self.model_cache_root = configure_model_cache()
         self._model = None
         self._preprocess = None
         self._tokenizer = None
@@ -91,15 +97,20 @@ class OpenClipAnalyzer:
             return
 
         try:
+            import inspect
             import open_clip
             import torch
         except Exception as exc:  # pragma: no cover - import failure is environment-dependent
             raise RuntimeError("open-clip-torch and torch are required for AI analysis") from exc
 
         self._device = self._resolve_device()
+        create_kwargs = {}
+        if "cache_dir" in inspect.signature(open_clip.create_model_and_transforms).parameters:
+            create_kwargs["cache_dir"] = str(self.model_cache_root)
         model, _, preprocess = open_clip.create_model_and_transforms(
             self.model_name,
             pretrained=self.pretrained,
+            **create_kwargs,
         )
         model = model.to(self._device)
         tokenizer = open_clip.get_tokenizer(self.model_name)
@@ -119,21 +130,26 @@ class OpenClipAnalyzer:
         return f"{self.model_name}:{self.pretrained}"
 
     def infer(self, image_path: str, labels: Sequence[str] | None = None, top_k: int = 8) -> AnalysisResult:
+        logger.debug("Inferring single image path=%s", image_path)
         return self.infer_batch([image_path], labels=labels, top_k=top_k)[0]
+
+    def apply_prompt_template(self, labels):
+        template = PROMPT_TEMPLATE
+        return tuple(template.format(label) for label in labels)
 
     def infer_batch(self, image_paths: Sequence[str], labels: Sequence[str] | None = None, top_k: int = 8) -> list[AnalysisResult]:
         self._ensure_model()
-        labels = tuple(labels or DEFAULT_LABELS)
+        raw_labels = tuple(labels or DEFAULT_LABELS)
+        labels = self.apply_prompt_template(raw_labels)
         image_paths = [str(path) for path in image_paths]
         if not image_paths:
             return []
-
-        from PIL import Image
+        logger.info("Infer batch started count=%s model=%s", len(image_paths), self.model_id())
 
         image_tensors = []
         for image_path in image_paths:
-            with Image.open(image_path) as image:
-                image_tensors.append(self._preprocess(image.convert("RGB")))
+            image = load_image_for_processing(image_path)
+            image_tensors.append(self._preprocess(image.convert("RGB")))
         image_tensor = self._torch.stack(image_tensors, dim=0).to(self._device)
         label_tokens = self._tokenizer(list(labels)).to(self._device)
 
@@ -153,10 +169,11 @@ class OpenClipAnalyzer:
             row_probabilities = probabilities[row_index]
             ranked_indexes = np.argsort(row_probabilities)[::-1][: max(1, top_k)]
             tags = [
-                TagPrediction(tag_name=labels[index], confidence=float(row_probabilities[index]))
+                TagPrediction(tag_name=raw_labels[index], confidence=float(row_probabilities[index]))
                 for index in ranked_indexes
             ]
             results.append(AnalysisResult(tags=tags, embedding=embeddings[row_index], model_name=model_name))
+        logger.info("Infer batch finished count=%s model=%s", len(results), model_name)
         return results
 
     def embedding_to_bytes(self, embedding: np.ndarray) -> bytes:
@@ -165,6 +182,7 @@ class OpenClipAnalyzer:
 
     def text_to_embedding(self, text: str) -> np.ndarray:
         self._ensure_model()
+        logger.debug("Creating text embedding text=%s", text)
         text_tokens = self._tokenizer([text]).to(self._device)
         with self._torch.no_grad():
             text_features = self._model.encode_text(text_tokens)

@@ -4,10 +4,16 @@ from collections import defaultdict
 from datetime import datetime
 from fractions import Fraction
 import json
+import logging
 from pathlib import Path
 from typing import Any
-
+from .exiftool_manager import ExifToolManager
+from exiftool import ExifToolHelper
 from PIL import ExifTags, Image
+
+from .image_processing import load_image_for_processing
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_iso8601(value: str) -> datetime:
@@ -150,8 +156,8 @@ def get_img_xmp(image: Image.Image) -> dict[str, Any]:
 
 def get_img_exif(image: Image.Image) -> dict[str, Any]:
     img_exif = image.getexif()
-    if not img_exif:
-        return get_img_xmp(image)
+    # if not img_exif:
+    #     return get_img_xmp(image)
 
     result_dict: dict[str, Any] = defaultdict(str)
     for key, val in img_exif.items():
@@ -159,18 +165,42 @@ def get_img_exif(image: Image.Image) -> dict[str, Any]:
         if tag_name:
             result_dict[tag_name] = val
 
-    xmp_data = get_img_xmp(image)
-    for key, value in xmp_data.items():
-        result_dict.setdefault(key, value)
+    # xmp_data = get_img_xmp(image)
+    # for key, value in xmp_data.items():
+    #     result_dict.setdefault(key, value)
 
     return dict(result_dict)
 
-
+def read_image_metadata_exiftool(image_path: str | Path) -> dict[str, Any]:
+        result_dict: dict[str, Any] = defaultdict(str)
+        
+        image_path_str = str(image_path)
+        with ExifToolHelper(executable=str(ExifToolManager().ensure_exiftool()), encoding="utf-8") as et:
+            try:
+                metadata_list = et.get_metadata(image_path_str)
+                if not metadata_list:
+                    return result_dict
+                
+                raw_metadata = metadata_list[0]
+                
+                for key, val in raw_metadata.items():
+                    if ":" in key:
+                        tag_name = key.split(":", 1)[1]
+                    else:
+                        tag_name = key
+                    
+                    result_dict[tag_name] = val
+                    
+            except Exception as e:
+                print(f"Failed to read image metadata for {image_path}: {e}")
+                logger.exception("Failed to read image metadata for %s", image_path)
+                
+        return dict(result_dict)
 def read_image_metadata(image_path: str | Path) -> dict[str, Any]:
-    with Image.open(image_path) as image:
-        return get_img_exif(image)
-if __name__ == "__main__":
-    print('start')
-    image_path=r"F:\相片\20251020湖边\枫叶和塔\DSC_7422_1.jpg"
-    exif_info=read_image_metadata(image_path)
-    print(exif_info)
+    try:
+        logger.debug("Reading image metadata path=%s", image_path)
+        exif_info = read_image_metadata_exiftool(image_path)
+    except Exception:
+        logger.exception("Failed to read image metadata path=%s", image_path)
+        return {}
+    return exif_info

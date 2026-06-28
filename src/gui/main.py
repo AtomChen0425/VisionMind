@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import logging
 import sys
 
 from PySide6.QtCore import QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from src.core.analyzer import AnalysisService, OpenClipAnalyzer
 from src.core.database import DatabaseManager
+from src.core.logging_utils import setup_logging
 from src.core.metadata_reader import read_image_metadata
 from src.core.semantic_search import SemanticSearchService
 from src.core.pipeline import PhotoProcessingPipeline
@@ -142,7 +144,10 @@ class DetailsPanel(QFrame):
         self.preview.set_source_pixmap(pixmap)
         self.path.setText(item.file_path)
         self.relative_path.setText(item.relative_path)
-        self.status.setText(item.status)
+        if item.status == "error" and item.last_error:
+            self.status.setText(f"error: {item.last_error}")
+        else:
+            self.status.setText(item.status)
         self.metadata_state.setText(item.xmp_state)
         if tags:
             text = "\n".join(f"{row['tag_name']}  ({row['confidence']:.2f})" for row in tags)
@@ -159,12 +164,16 @@ class DetailsPanel(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.logger = logging.getLogger(__name__)
         self.setWindowTitle("PhotoManager")
         self.resize(1600, 960)
 
+        self.log_path = setup_logging()
+        self.logger.info("Application starting")
         self.db = DatabaseManager("data/photo_manager.db")
         self.scanner = Scanner(self.db)
         self.analyzer = OpenClipAnalyzer()
+        self.logger.info("open_clip cache root=%s", self.analyzer.model_cache_root)
         self.analysis_service = AnalysisService(self.analyzer)
         self.vector_index = VectorIndexManager(self.db)
         self.search_service = SemanticSearchService(self.db, self.analysis_service, self.vector_index)
@@ -808,6 +817,7 @@ class MainWindow(QMainWindow):
     def _manual_scan_current_library(self):
         if self.library_id is None:
             return
+        self.logger.info("Manual scan requested for library_id=%s root_path=%s", self.library_id, self.root_path)
         self.controller.scan_library(self.library_id)
         self._update_library_action_state()
         self._set_status("Manual scan started")
@@ -826,15 +836,18 @@ class MainWindow(QMainWindow):
         if response != QMessageBox.Yes:
             return
         try:
+            self.logger.info("Deleting library_id=%s root_path=%s", library_id, self.root_path)
             self.controller.remove_library(library_id)
             self.vector_index.delete_library_indexes(library_id)
         except Exception as exc:
+            self.logger.exception("Failed to delete library_id=%s", library_id)
             QMessageBox.critical(self, "Delete Library Failed", str(exc))
             return
         self._set_status("Library deleted")
         self._update_library_action_state()
 
     def closeEvent(self, event):
+        self.logger.info("Application closing")
         self.controller.stop()
         if hasattr(self, "gallery_model"):
             self.gallery_model.shutdown()

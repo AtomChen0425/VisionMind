@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from typing import Sequence
 
 import numpy as np
@@ -11,6 +12,8 @@ except Exception:  # pragma: no cover - dependency availability is environment-s
     faiss = None
 
 from .database import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 
 class VectorIndexManager:
@@ -79,13 +82,14 @@ class VectorIndexManager:
             removed_count = index.remove_ids(selector)
             return removed_count
         except Exception as e:
-            print(f"Warning: Failed to remove ID {file_id} from FAISS: {e}")
+            logger.warning("Failed to remove FAISS id file_id=%s error=%s", file_id, e)
             return 0
 
     def upsert_embedding(self, library_id: int, model_name: str, file_id: int, vector: Sequence[float]) -> bool:
         if not self._ensure_faiss():
             return False
         normalized = self._normalize(vector)
+        logger.debug("Upserting FAISS embedding library_id=%s model=%s file_id=%s dim=%s", library_id, model_name, file_id, normalized.size)
         index, index_path = self._load_index(library_id, model_name, normalized.size)
         if index is None:
             return False
@@ -111,6 +115,7 @@ class VectorIndexManager:
     def rebuild_from_embeddings(self, library_id: int, model_name: str):
         if not self._ensure_faiss():
             return None
+        logger.info("Rebuilding FAISS index library_id=%s model=%s", library_id, model_name)
         rows = self.db.list_embeddings_for_library(library_id, model_name)
         if not rows:
             return None
@@ -140,6 +145,7 @@ class VectorIndexManager:
     def search(self, library_id: int, model_name: str, query_vector: Sequence[float], limit: int = 20) -> list[tuple[int, float]]:
         if not self._ensure_faiss():
             return []
+        logger.debug("Searching FAISS library_id=%s model=%s limit=%s dim=%s", library_id, model_name, limit, len(query_vector))
         normalized = self._normalize(query_vector)
         index_info = self.db.get_vector_index(library_id, model_name)
         if index_info is None:
@@ -170,9 +176,11 @@ class VectorIndexManager:
             if int(file_id) < 0:
                 continue
             results.append((int(file_id), float(score)))
+        logger.debug("FAISS search finished library_id=%s model=%s hits=%s", library_id, model_name, len(results))
         return results
 
     def delete_library_indexes(self, library_id: int):
+        logger.info("Deleting FAISS indexes library_id=%s", library_id)
         index_dir = self.base_dir / str(library_id)
         if index_dir.exists():
             for path in index_dir.glob("*.faiss"):

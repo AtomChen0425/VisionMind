@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,7 @@ class ScanSummary:
 class Scanner:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
+        self.logger = logging.getLogger(__name__)
         self.progress = 0
         self.current_file = ""
         self.last_summary: ScanSummary | None = None
@@ -99,6 +101,7 @@ class Scanner:
         progress_callback: Callable[[ScanSummary], None] | None = None,
     ) -> ScanSummary:
         normalized_root = str(Path(root_dir).resolve())
+        self.logger.info("Scan started root=%s", normalized_root)
         library_id = self.db.register_library(normalized_root)
         scan_run_id = self.db.create_scan_run(library_id, normalized_root)
         summary = ScanSummary(library_id=library_id, root_path=normalized_root)
@@ -112,6 +115,7 @@ class Scanner:
                 self.db.update_scan_run_progress(scan_run_id, files_seen=0, files_changed=0, files_deleted=0)
                 self.db.finish_scan_run(scan_run_id, "completed")
                 self.last_summary = summary
+                self.logger.info("Scan completed root=%s files_seen=0", normalized_root)
                 return summary
 
             for index, file_path in enumerate(files_to_scan, start=1):
@@ -123,6 +127,7 @@ class Scanner:
                 except OSError:
                     summary.files_skipped += 1
                     summary.errors += 1
+                    self.logger.warning("Stat failed path=%s", file_path)
                     continue
 
                 normalized_file_path = str(Path(file_path).resolve())
@@ -144,7 +149,7 @@ class Scanner:
                     or existing["relative_path"] != relative_path
                     or int(existing["library_id"]) != int(library_id)
                 ) if existing is not None else True
-                status_to_set = "pending" if existing is None or metadata_changed or str(existing["status"]) == "error" or existing["deleted_at"] is not None else str(existing["status"])
+                status_to_set = "pending" if existing is None or metadata_changed or existing["deleted_at"] is not None else str(existing["status"])
 
                 try:
                     file_id, changed = self.db.upsert_file_record(
@@ -161,6 +166,7 @@ class Scanner:
                 except OSError:
                     summary.files_skipped += 1
                     summary.errors += 1
+                    self.logger.warning("Failed to upsert file record path=%s", normalized_file_path)
                     continue
 
                 if existing is None:
@@ -184,9 +190,20 @@ class Scanner:
                 files_deleted=summary.files_deleted,
             )
             self.db.finish_scan_run(scan_run_id, "completed")
+            self.logger.info(
+                "Scan completed root=%s seen=%s added=%s updated=%s unchanged=%s deleted=%s errors=%s",
+                normalized_root,
+                summary.files_seen,
+                summary.files_added,
+                summary.files_updated,
+                summary.files_unchanged,
+                summary.files_deleted,
+                summary.errors,
+            )
             return summary
         except Exception as exc:
             self.db.finish_scan_run(scan_run_id, "failed", str(exc))
+            self.logger.exception("Scan failed root=%s", normalized_root)
             raise
 
     def get_scan_progress(self):
