@@ -112,6 +112,20 @@ class PhotoProcessingPipeline:
             metadata_written = output_path.exists()
             self.db.set_metadata_state(file_id, "written")
             self.logger.info("Metadata written file_id=%s path=%s", file_id, image_path)
+            if metadata_written:
+                stat_result = output_path.stat()
+                self.db.sync_file_metadata(
+                    file_id,
+                    mtime=stat_result.st_mtime,
+                    mtime_ns=stat_result.st_mtime_ns,
+                    size=stat_result.st_size,
+                )
+                self.logger.debug(
+                    "Synced file metadata file_id=%s mtime_ns=%s size=%s",
+                    file_id,
+                    stat_result.st_mtime_ns,
+                    stat_result.st_size,
+                )
 
         embedding_written = False
         if result.embedding is not None:
