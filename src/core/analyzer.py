@@ -41,6 +41,7 @@ DEFAULT_LABELS = (
 )
 
 PROMPT_TEMPLATE = "a photo of a {}"
+PROTABILITY_THRESHOLD = 0.2
 logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class TagPrediction:
@@ -167,10 +168,14 @@ class OpenClipAnalyzer:
         model_name = self.model_id()
         for row_index in range(len(image_paths)):
             row_probabilities = probabilities[row_index]
-            ranked_indexes = np.argsort(row_probabilities)[::-1][: max(1, top_k)]
+            sorted_indexes = np.argsort(row_probabilities)[::-1]
+            valid_indexes = [
+                idx for idx in sorted_indexes 
+                if float(row_probabilities[idx]) > PROTABILITY_THRESHOLD
+            ][: max(1, top_k)]
             tags = [
                 TagPrediction(tag_name=raw_labels[index], confidence=float(row_probabilities[index]))
-                for index in ranked_indexes
+                for index in valid_indexes
             ]
             results.append(AnalysisResult(tags=tags, embedding=embeddings[row_index], model_name=model_name))
         logger.info("Infer batch finished count=%s model=%s", len(results), model_name)

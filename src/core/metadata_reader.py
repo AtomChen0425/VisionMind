@@ -310,7 +310,6 @@ def read_image_metadata_exiftool(image_path: str | Path) -> dict[str, Any]:
         "Title": ("text", "Title"),
         "ImageDescription": ("text", "Description"),
         "XPTitle": ("text", "XPTitle"),
-        "XPKeywords": ("text", "XPKeywords"),
         "Keywords": ("text", "Keywords"),
         "Subject": ("text", "Subject"),
         "Comment": ("text", "Comment"),
