@@ -7,7 +7,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-
+from .exiftool_manager import ExifToolManager
+from exiftool import ExifToolHelper
 from PIL import ExifTags, Image
 
 from .image_processing import load_image_for_processing
@@ -170,12 +171,36 @@ def get_img_exif(image: Image.Image) -> dict[str, Any]:
 
     return dict(result_dict)
 
-
+def read_image_metadata_exiftool(image_path: str | Path) -> dict[str, Any]:
+        result_dict: dict[str, Any] = defaultdict(str)
+        
+        image_path_str = str(image_path)
+        with ExifToolHelper(executable=str(ExifToolManager().ensure_exiftool()), encoding="utf-8") as et:
+            try:
+                metadata_list = et.get_metadata(image_path_str)
+                if not metadata_list:
+                    return result_dict
+                
+                raw_metadata = metadata_list[0]
+                
+                for key, val in raw_metadata.items():
+                    if ":" in key:
+                        tag_name = key.split(":", 1)[1]
+                    else:
+                        tag_name = key
+                    
+                    result_dict[tag_name] = val
+                    
+            except Exception as e:
+                print(f"Failed to read image metadata for {image_path}: {e}")
+                logger.exception("Failed to read image metadata for %s", image_path)
+                
+        return dict(result_dict)
 def read_image_metadata(image_path: str | Path) -> dict[str, Any]:
     try:
         logger.debug("Reading image metadata path=%s", image_path)
-        image = load_image_for_processing(image_path)
+        exif_info = read_image_metadata_exiftool(image_path)
     except Exception:
         logger.exception("Failed to read image metadata path=%s", image_path)
         return {}
-    return get_img_exif(image)
+    return exif_info
