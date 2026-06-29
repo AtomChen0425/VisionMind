@@ -4,7 +4,7 @@ from pathlib import Path
 import logging
 import sys
 
-from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl
+from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect
 from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QLayout,
+    QLayoutItem,
     QLabel,
     QLineEdit,
     QListView,
@@ -23,7 +25,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QMenu,
-    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QTreeWidget,
@@ -60,6 +61,117 @@ class StatCard(QFrame):
 
     def set_value(self, value: str):
         self.value.setText(value)
+
+
+class FlowLayout(QLayout):
+    def __init__(self, parent: QWidget | None = None, margin: int = 0, h_spacing: int = 6, v_spacing: int = 6):
+        super().__init__(parent)
+        self._items: list[QLayoutItem] = []
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item: QLayoutItem):
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index: int):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect: QRect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect: QRect, test_only: bool) -> int:
+        left, top, right, bottom = self.getContentsMargins()
+        effective_rect = rect.adjusted(left, top, -right, -bottom)
+        x = effective_rect.x()
+        y = effective_rect.y()
+        line_height = 0
+
+        for item in self._items:
+            widget = item.widget()
+            if widget is not None:
+                widget.adjustSize()
+            next_x = x + item.sizeHint().width() + self._h_spacing
+            if next_x - self._h_spacing > effective_rect.right() and line_height > 0:
+                x = effective_rect.x()
+                y += line_height + self._v_spacing
+                next_x = x + item.sizeHint().width() + self._h_spacing
+                line_height = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+
+        return y + line_height - rect.y() + bottom
+
+
+class TagWrapWidget(QWidget):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("TagWrapWidget")
+        self.flow_layout = FlowLayout(self, margin=0, h_spacing=6, v_spacing=6)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+    def add_widget(self, widget: QWidget):
+        self.flow_layout.addWidget(widget)
+        self.updateGeometry()
+        self.adjustSize()
+
+    def clear(self):
+        while self.flow_layout.count():
+            item = self.flow_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.updateGeometry()
+        self.adjustSize()
+
+    def heightForWidth(self, width: int) -> int:
+        return self.flow_layout.heightForWidth(width)
+
+    def sizeHint(self):
+        width = self.width() if self.width() > 0 else 320
+        return QSize(width, self.heightForWidth(width))
+
+    def minimumSizeHint(self):
+        return self.flow_layout.minimumSize()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.updateGeometry()
 
 
 class AspectPreviewLabel(QLabel):
@@ -107,19 +219,7 @@ class DetailsPanel(QFrame):
         self.relative_path = QLabel("-")
         self.status = QLabel("-")
         self.metadata_state = QLabel("-")
-        self.tags_scroll = QScrollArea()
-        self.tags_scroll.setWidgetResizable(True)
-        self.tags_scroll.setFrameShape(QFrame.NoFrame)
-        self.tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.tags_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.tags_scroll.setFixedHeight(32)
-        self.tags_body = QWidget()
-        self.tags_layout = QHBoxLayout(self.tags_body)
-        self.tags_layout.setContentsMargins(0, 0, 0, 0)
-        self.tags_layout.setSpacing(6)
-        self.tags_layout.addStretch(1)
-        self.tags_scroll.setWidget(self.tags_body)
+        self.tags_wrap = TagWrapWidget()
         self.metadata_tree = QTreeWidget()
         self.metadata_tree.setColumnCount(2)
         self.metadata_tree.setHeaderLabels(["字段", "值"])
@@ -137,7 +237,7 @@ class DetailsPanel(QFrame):
         layout.addWidget(self._label_block("相对路径", self.relative_path))
         layout.addWidget(self._label_block("状态", self.status))
         layout.addWidget(self._label_block("元数据", self.metadata_state))
-        layout.addWidget(self._label_block("标签", self.tags_scroll))
+        layout.addWidget(self._label_block("标签", self.tags_wrap))
         layout.addWidget(self._label_block("图片信息", self.metadata_tree))
 
     def _label_block(self, title: str, widget: QWidget):
@@ -213,18 +313,13 @@ class DetailsPanel(QFrame):
         self.metadata_tree.expandAll()
 
     def _set_keyword_chips(self, keywords: list[str]):
-        while self.tags_layout.count():
-            child = self.tags_layout.takeAt(0)
-            widget = child.widget()
-            if widget is not None:
-                widget.deleteLater()
+        self.tags_wrap.clear()
 
         if not keywords:
             empty = QLabel("暂无关键词")
             empty.setObjectName("KeywordEmpty")
             empty.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.tags_layout.addWidget(empty)
-            self.tags_layout.addStretch(1)
+            self.tags_wrap.add_widget(empty)
             return
 
         for keyword in keywords:
@@ -233,9 +328,9 @@ class DetailsPanel(QFrame):
             chip.setTextInteractionFlags(Qt.TextSelectableByMouse)
             chip.setWordWrap(False)
             chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.tags_layout.addWidget(chip)
+            self.tags_wrap.add_widget(chip)
 
-        self.tags_layout.addStretch(1)
+        self.tags_wrap.updateGeometry()
 
     def _format_metadata_value(self, value):
         if value is None:
@@ -704,22 +799,25 @@ class MainWindow(QMainWindow):
                 background: #dceaff;
                 color: #1f4f93;
             }
+            QWidget#TagWrapWidget {
+                background: transparent;
+            }
             QLabel#KeywordChip {
-                background: #f7f8fa;
+                background: #E7EFF9;
                 color: #344054;
                 border: 1px solid #e3e7ee;
-                border-radius: 10px;
+                border-radius: 19px;
                 padding: 0px 6px;
-                font-size: 9px;
+                font-size: 11px;
                 font-weight: 500;
             }
             QLabel#KeywordEmpty {
                 color: #8a97ab;
-                background: #f6f8fb;
+                background: #E7EFF9;
                 border: 1px dashed #d8e2ee;
-                border-radius: 10px;
+                border-radius: 19px;
                 padding: 0px 6px;
-                font-size: 9px;
+                font-size: 11px;
             }
             QHeaderView::section {
                 background: #f1f5fa;
