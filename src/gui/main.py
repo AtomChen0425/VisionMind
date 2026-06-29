@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QMenu,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QTreeWidget,
@@ -369,6 +370,7 @@ class MainWindow(QMainWindow):
         self.root_path: str = ""
         self._updating_library_list = False
         self._search_mode = "混合"
+        self._details_panel_width = 380
 
         self._build_ui()
         self._bind_signals()
@@ -568,13 +570,23 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(center_panel, 1)
 
         right_panel = DetailsPanel()
-        right_panel.setFixedWidth(380)
+        right_panel.setMinimumWidth(320)
+        right_panel.setMaximumWidth(720)
         right_panel.hide()
         self.details_panel = right_panel
 
+        self.content_splitter = QSplitter(Qt.Horizontal)
+        self.content_splitter.setChildrenCollapsible(False)
+        self.content_splitter.setHandleWidth(8)
+        self.content_splitter.setOpaqueResize(True)
+        self.content_splitter.addWidget(main_panel)
+        self.content_splitter.addWidget(right_panel)
+        self.content_splitter.setStretchFactor(0, 1)
+        self.content_splitter.setStretchFactor(1, 0)
+        self.content_splitter.setSizes([1, 0])
+
         root.addWidget(left_panel)
-        root.addWidget(main_panel, 1)
-        root.addWidget(right_panel)
+        root.addWidget(self.content_splitter, 1)
 
     def _bind_signals(self):
         self.controller.libraries_changed.connect(self._on_libraries_changed)
@@ -909,6 +921,32 @@ class MainWindow(QMainWindow):
     def _set_status(self, text: str):
         self.status_label.setText(text)
 
+    def _set_details_visible(self, visible: bool):
+        if not hasattr(self, "content_splitter"):
+            return
+        if not visible:
+            sizes = self.content_splitter.sizes()
+            if len(sizes) >= 2 and sizes[1] > 0:
+                self._details_panel_width = max(320, sizes[1])
+            self.details_panel.setVisible(False)
+            sizes = self.content_splitter.sizes()
+            if len(sizes) >= 2:
+                total = max(1, sum(sizes))
+                self.content_splitter.setSizes([total, 0])
+            return
+        self.details_panel.setVisible(True)
+        sizes = self.content_splitter.sizes()
+        if len(sizes) < 2 or sizes[1] > 0:
+            return
+        total = max(1, sum(sizes) or self.content_splitter.width() or self.width() or 1)
+        desired_right = min(560, max(320, self._details_panel_width))
+        if total > 2:
+            desired_right = min(desired_right, total - 1)
+        if desired_right <= 0:
+            return
+        left_size = max(1, total - desired_right)
+        self.content_splitter.setSizes([left_size, desired_right])
+
     def eventFilter(self, watched, event):
         if hasattr(self, "view") and watched is self.view.viewport() and event.type() == QEvent.MouseButtonPress:
             if self.view.indexAt(event.position().toPoint()).isValid():
@@ -917,7 +955,7 @@ class MainWindow(QMainWindow):
                 self.view.clearSelection()
                 self.view.setCurrentIndex(QModelIndex())
                 self.details_panel.set_item(None, [])
-                self.details_panel.hide()
+                self._set_details_visible(False)
         return super().eventFilter(watched, event)
 
     def _selected_gallery_index(self, view_index: QModelIndex | None = None):
@@ -1126,7 +1164,7 @@ class MainWindow(QMainWindow):
             self.album_subtitle.setText("0 张照片")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
-            self.details_panel.hide()
+            self._set_details_visible(False)
             return
         self._refresh_stats()
         self._update_library_action_state()
@@ -1163,7 +1201,7 @@ class MainWindow(QMainWindow):
                     self.album_subtitle.setText("0 张照片")
                     self.view.setModel(None)
                     self.details_panel.set_item(None, [])
-                    self.details_panel.hide()
+                    self._set_details_visible(False)
                     self._refresh_stats()
         self._updating_library_list = False
         if not libraries:
@@ -1174,7 +1212,7 @@ class MainWindow(QMainWindow):
             self.album_subtitle.setText("0 张照片")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
-            self.details_panel.hide()
+            self._set_details_visible(False)
             self._refresh_stats()
         self._update_library_action_state()
 
@@ -1190,7 +1228,7 @@ class MainWindow(QMainWindow):
         self.view.setIconSize(self.gallery_model._placeholder.size())
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
         self.details_panel.set_item(None, [])
-        self.details_panel.hide()
+        self._set_details_visible(False)
         self.search_box.blockSignals(True)
         self.search_box.clear()
         self.search_box.blockSignals(False)
@@ -1216,16 +1254,16 @@ class MainWindow(QMainWindow):
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex):
         if not current.isValid():
             self.details_panel.set_item(None, [])
-            self.details_panel.hide()
+            self._set_details_visible(False)
             return
         item = self.gallery_model.item(current.row())
         if item is None:
             self.details_panel.set_item(None, [])
-            self.details_panel.hide()
+            self._set_details_visible(False)
             return
         tags=  extract_keywords(read_image_metadata(item.file_path))
         self.details_panel.set_item(item, tags)
-        self.details_panel.show()
+        self._set_details_visible(True)
 
     def _save_excludes(self):
         if self.library_id is None:
