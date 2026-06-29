@@ -591,8 +591,8 @@ class MainWindow(QMainWindow):
                 if self.library_list.count() == 0:
                     self.library_id = None
                     self.root_path = ""
-                    self.library_label.setText("未选择相册")
-                    self.album_title.setText("默认相册")
+                    self.library_label.setText("Unselected library")
+                    self.album_title.setText("Default Album")
                     self.album_subtitle.setText("0 photos")
                     self.view.setModel(None)
                     self.details_panel.set_item(None, [])
@@ -602,8 +602,8 @@ class MainWindow(QMainWindow):
         if not libraries:
             self.library_id = None
             self.root_path = ""
-            self.library_label.setText("未选择相册")
-            self.album_title.setText("默认相册")
+            self.library_label.setText("Unselected library")
+            self.album_title.setText("Default Album")
             self.album_subtitle.setText("0 photos")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
