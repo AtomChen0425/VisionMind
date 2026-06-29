@@ -55,19 +55,6 @@ QFrame#LibraryTools {
     border: 1px solid #e1e8f2;
     border-radius: 8px;
 }
-QLabel#BrandMark {
-    background: #162033;
-    color: #ffffff;
-    border: 2px solid #2f73d9;
-    border-radius: 19px;
-    min-width: 38px;
-    max-width: 38px;
-    min-height: 38px;
-    max-height: 38px;
-    qproperty-alignment: AlignCenter;
-    font-size: 13px;
-    font-weight: 800;
-}
 QLabel#AppTitle {
     font-size: 15px;
     font-weight: 800;

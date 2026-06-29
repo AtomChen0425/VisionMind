@@ -43,7 +43,7 @@ from src.gui.gallery import GalleryModel
 from src.gui.widgets import DetailsPanel, StatCard
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-qss_path = os.path.join(current_dir, "style.qss")
+css_path = os.path.join(current_dir, "style.css")
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -112,15 +112,12 @@ class MainWindow(QMainWindow):
 
         brand_row = QHBoxLayout()
         brand_row.setSpacing(10)
-        self.brand_mark = QLabel("N")
-        self.brand_mark.setObjectName("BrandMark")
-        self.title_label = QLabel("AI Photos")
+        self.title_label = QLabel("AI Gallery")
         self.title_label.setObjectName("AppTitle")
         self.settings_btn = QPushButton("⚙")
         self.settings_btn.setObjectName("IconButton")
         self.settings_btn.setEnabled(False)
-        brand_row.addWidget(self.brand_mark)
-        brand_row.addWidget(self.title_label, 1)
+        brand_row.addWidget(self.title_label, 3)
         brand_row.addWidget(self.settings_btn)
         left_layout.addLayout(brand_row)
 
@@ -310,7 +307,7 @@ class MainWindow(QMainWindow):
         palette.setColor(QPalette.Highlight, QColor("#2f73d9"))
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         QApplication.instance().setPalette(palette)
-        with open(qss_path, "r", encoding="utf-8") as f:
+        with open(css_path, "r", encoding="utf-8") as f:
             self.setStyleSheet(f.read())
 
     def _set_status(self, text: str):
