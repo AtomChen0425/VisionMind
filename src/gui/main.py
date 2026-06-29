@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 import logging
@@ -12,8 +12,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
-    QLayout,
-    QLayoutItem,
     QLabel,
     QLineEdit,
     QListView,
@@ -23,13 +21,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSizePolicy,
     QMenu,
     QSplitter,
-    QTextEdit,
     QVBoxLayout,
-    QTreeWidget,
-    QTreeWidgetItem,
     QWidget,
 )
 
@@ -46,304 +40,7 @@ from src.gui.automation import AutoLibraryController
 from src.gui.gallery import GalleryModel
 
 
-class StatCard(QFrame):
-    def __init__(self, title: str, value: str = "0"):
-        super().__init__()
-        self.setObjectName("StatCard")
-        self.title = QLabel(title)
-        self.title.setObjectName("StatTitle")
-        self.value = QLabel(value)
-        self.value.setObjectName("StatValue")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(4)
-        layout.addWidget(self.title)
-        layout.addWidget(self.value)
-
-    def set_value(self, value: str):
-        self.value.setText(value)
-
-
-class FlowLayout(QLayout):
-    def __init__(self, parent: QWidget | None = None, margin: int = 0, h_spacing: int = 6, v_spacing: int = 6):
-        super().__init__(parent)
-        self._items: list[QLayoutItem] = []
-        self._h_spacing = h_spacing
-        self._v_spacing = v_spacing
-        self.setContentsMargins(margin, margin, margin, margin)
-
-    def addItem(self, item: QLayoutItem):
-        self._items.append(item)
-
-    def count(self) -> int:
-        return len(self._items)
-
-    def itemAt(self, index: int):
-        if 0 <= index < len(self._items):
-            return self._items[index]
-        return None
-
-    def takeAt(self, index: int):
-        if 0 <= index < len(self._items):
-            return self._items.pop(index)
-        return None
-
-    def expandingDirections(self):
-        return Qt.Orientations(Qt.Orientation(0))
-
-    def hasHeightForWidth(self) -> bool:
-        return True
-
-    def heightForWidth(self, width: int) -> int:
-        return self._do_layout(QRect(0, 0, width, 0), True)
-
-    def setGeometry(self, rect: QRect):
-        super().setGeometry(rect)
-        self._do_layout(rect, False)
-
-    def sizeHint(self):
-        return self.minimumSize()
-
-    def minimumSize(self):
-        size = QSize()
-        for item in self._items:
-            size = size.expandedTo(item.minimumSize())
-        margins = self.contentsMargins()
-        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
-        return size
-
-    def _do_layout(self, rect: QRect, test_only: bool) -> int:
-        left, top, right, bottom = self.getContentsMargins()
-        effective_rect = rect.adjusted(left, top, -right, -bottom)
-        x = effective_rect.x()
-        y = effective_rect.y()
-        line_height = 0
-
-        for item in self._items:
-            widget = item.widget()
-            if widget is not None:
-                widget.adjustSize()
-            next_x = x + item.sizeHint().width() + self._h_spacing
-            if next_x - self._h_spacing > effective_rect.right() and line_height > 0:
-                x = effective_rect.x()
-                y += line_height + self._v_spacing
-                next_x = x + item.sizeHint().width() + self._h_spacing
-                line_height = 0
-
-            if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
-
-            x = next_x
-            line_height = max(line_height, item.sizeHint().height())
-
-        return y + line_height - rect.y() + bottom
-
-
-class TagWrapWidget(QWidget):
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setObjectName("TagWrapWidget")
-        self.flow_layout = FlowLayout(self, margin=0, h_spacing=6, v_spacing=6)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-    def add_widget(self, widget: QWidget):
-        self.flow_layout.addWidget(widget)
-        self.updateGeometry()
-        self.adjustSize()
-
-    def clear(self):
-        while self.flow_layout.count():
-            item = self.flow_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self.updateGeometry()
-        self.adjustSize()
-
-    def heightForWidth(self, width: int) -> int:
-        return self.flow_layout.heightForWidth(width)
-
-    def sizeHint(self):
-        width = self.width() if self.width() > 0 else 320
-        return QSize(width, self.heightForWidth(width))
-
-    def minimumSizeHint(self):
-        return self.flow_layout.minimumSize()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.updateGeometry()
-
-
-class AspectPreviewLabel(QLabel):
-    def __init__(self):
-        super().__init__("选择照片")
-        self.setAlignment(Qt.AlignCenter)
-        self.setMinimumHeight(260)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._source_pixmap: QPixmap | None = None
-
-    def set_source_pixmap(self, pixmap: QPixmap | None):
-        self._source_pixmap = pixmap
-        self._refresh_pixmap()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._refresh_pixmap()
-
-    def _refresh_pixmap(self):
-        if self._source_pixmap is None or self._source_pixmap.isNull():
-            self.setPixmap(QPixmap())
-            return
-        scaled = self._source_pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.setPixmap(scaled)
-
-
-class DetailsPanel(QFrame):
-    SECTION_LABELS = {
-        "file": "文件",
-        "camera": "相机",
-        "capture": "拍摄",
-        "exposure": "曝光",
-        "lens": "镜头",
-        "location": "位置",
-        "text": "文本",
-        "technical": "技术",
-    }
-
-    def __init__(self):
-        super().__init__()
-        self.setObjectName("DetailsPanel")
-        self.preview = AspectPreviewLabel()
-
-        self.path = QLabel("-")
-        self.relative_path = QLabel("-")
-        self.status = QLabel("-")
-        self.metadata_state = QLabel("-")
-        self.tags_wrap = TagWrapWidget()
-        self.metadata_tree = QTreeWidget()
-        self.metadata_tree.setColumnCount(2)
-        self.metadata_tree.setHeaderLabels(["字段", "值"])
-        self.metadata_tree.setRootIsDecorated(False)
-        self.metadata_tree.setAlternatingRowColors(True)
-        self.metadata_tree.setIndentation(18)
-        self.metadata_tree.header().setStretchLastSection(True)
-        self.metadata_tree.setMinimumHeight(200)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(14)
-        layout.addWidget(self.preview)
-        layout.addWidget(self._label_block("文件", self.path))
-        layout.addWidget(self._label_block("相对路径", self.relative_path))
-        layout.addWidget(self._label_block("状态", self.status))
-        layout.addWidget(self._label_block("元数据", self.metadata_state))
-        layout.addWidget(self._label_block("标签", self.tags_wrap))
-        layout.addWidget(self._label_block("图片信息", self.metadata_tree))
-
-    def _label_block(self, title: str, widget: QWidget):
-        container = QFrame()
-        container.setObjectName("DetailBlock")
-        block_layout = QVBoxLayout(container)
-        block_layout.setContentsMargins(0, 0, 0, 0)
-        block_layout.setSpacing(4)
-        heading = QLabel(title)
-        heading.setObjectName("DetailHeading")
-        block_layout.addWidget(heading)
-        block_layout.addWidget(widget)
-        return container
-
-    def set_item(self, item, tags):
-        if item is None:
-            self.preview.setText("选择照片")
-            self.preview.set_source_pixmap(None)
-            self.path.setText("-")
-            self.relative_path.setText("-")
-            self.status.setText("-")
-            self.metadata_state.setText("-")
-            self._set_keyword_chips([])
-            self.metadata_tree.clear()
-            self.metadata_tree.addTopLevelItem(QTreeWidgetItem(["选择照片后显示结构化元数据", ""]))
-            return
-
-        pixmap = item.thumbnail or QPixmap(320, 320)
-        if item.thumbnail is None:
-            pixmap.fill(QColor("#f3f0e8"))
-        self.preview.setText("")
-        self.preview.set_source_pixmap(pixmap)
-        self.path.setText(item.file_path)
-        self.relative_path.setText(item.relative_path)
-        if item.status == "error" and item.last_error:
-            self.status.setText(f"error: {item.last_error}")
-        else:
-            self.status.setText(item.status)
-        self.metadata_state.setText(item.xmp_state)
-        self._set_keyword_chips([str(row) for row in tags])
-        try:
-            metadata = read_image_metadata(item.file_path)
-            self._set_metadata_tree(metadata)
-        except Exception as exc:
-            self.metadata_tree.clear()
-            error_item = QTreeWidgetItem(["错误", f"读取元数据失败: {exc}"])
-            self.metadata_tree.addTopLevelItem(error_item)
-
-    def _set_metadata_tree(self, metadata: dict):
-        self.metadata_tree.clear()
-        if not metadata:
-            self.metadata_tree.addTopLevelItem(QTreeWidgetItem(["暂无可显示的元数据", ""]))
-            return
-
-        for section_name, fields in metadata.items():
-            label = self.SECTION_LABELS.get(section_name, section_name)
-            section_item = QTreeWidgetItem([label, ""])
-            section_font = section_item.font(0)
-            section_font.setBold(True)
-            section_item.setFont(0, section_font)
-            section_item.setFirstColumnSpanned(True)
-            section_item.setExpanded(True)
-
-            if isinstance(fields, dict):
-                for key, value in fields.items():
-                    child = QTreeWidgetItem([str(key), self._format_metadata_value(value)])
-                    section_item.addChild(child)
-            else:
-                section_item.addChild(QTreeWidgetItem(["值", self._format_metadata_value(fields)]))
-
-            self.metadata_tree.addTopLevelItem(section_item)
-
-        self.metadata_tree.expandAll()
-
-    def _set_keyword_chips(self, keywords: list[str]):
-        self.tags_wrap.clear()
-
-        if not keywords:
-            empty = QLabel("暂无关键词")
-            empty.setObjectName("KeywordEmpty")
-            empty.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.tags_wrap.add_widget(empty)
-            return
-
-        for keyword in keywords:
-            chip = QLabel(keyword)
-            chip.setObjectName("KeywordChip")
-            chip.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            chip.setWordWrap(False)
-            chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.tags_wrap.add_widget(chip)
-
-        self.tags_wrap.updateGeometry()
-
-    def _format_metadata_value(self, value):
-        if value is None:
-            return "-"
-        if isinstance(value, list):
-            return ", ".join(self._format_metadata_value(item) for item in value if item not in (None, ""))
-        if isinstance(value, dict):
-            parts = []
-            for key, item in value.items():
-                parts.append(f"{key}: {self._format_metadata_value(item)}")
-            return "; ".join(parts)
-        return str(value)
+from src.gui.widgets import DetailsPanel, StatCard
 
 
 class MainWindow(QMainWindow):
@@ -369,7 +66,7 @@ class MainWindow(QMainWindow):
         self.library_id: int | None = None
         self.root_path: str = ""
         self._updating_library_list = False
-        self._search_mode = "混合"
+        self._search_mode = "Mixed"
         self._details_panel_width = 380
 
         self._build_ui()
@@ -395,13 +92,13 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
 
         self.search_mode = QComboBox()
-        self.search_mode.addItems(["混合", "文件名", "语义"])
+        self.search_mode.addItems(["Mixed", "Filename", "Semantic"])
         self.search_mode.currentTextChanged.connect(self._on_search_mode_changed)
 
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText('文字搜图，例如"海边日落"、"多人合影"')
+        self.search_box.setPlaceholderText('Search photos, e.g. "sunset by the sea" or "group portrait"')
         self.search_box.returnPressed.connect(self._execute_search)
-        self.search_btn = QPushButton("搜索")
+        self.search_btn = QPushButton("Search")
         self.search_btn.clicked.connect(self._execute_search)
         self.search_btn.setObjectName("PrimaryButton")
 
@@ -416,7 +113,7 @@ class MainWindow(QMainWindow):
         brand_row.setSpacing(10)
         self.brand_mark = QLabel("N")
         self.brand_mark.setObjectName("BrandMark")
-        self.title_label = QLabel("AI 相册")
+        self.title_label = QLabel("AI Photos")
         self.title_label.setObjectName("AppTitle")
         self.settings_btn = QPushButton("⚙")
         self.settings_btn.setObjectName("IconButton")
@@ -430,7 +127,7 @@ class MainWindow(QMainWindow):
         self.people_row.setObjectName("NavRow")
         people_layout = QHBoxLayout(self.people_row)
         people_layout.setContentsMargins(10, 8, 10, 8)
-        self.people_label = QLabel("人物")
+        self.people_label = QLabel("People")
         self.people_count = QLabel("0")
         self.people_count.setObjectName("MutedCount")
         people_layout.addWidget(self.people_label, 1)
@@ -476,7 +173,7 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(self.exiftool_path_label)
         left_layout.addWidget(sidebar_footer)
 
-        self.library_label = QLabel("未选择相册")
+        self.library_label = QLabel("No library selected")
         self.library_label.setObjectName("LibraryPathLabel")
         self.library_label.setWordWrap(True)
 
@@ -485,15 +182,15 @@ class MainWindow(QMainWindow):
         self.excludes_box.setMinimumHeight(82)
         self.excludes_box.setMaximumHeight(110)
 
-        self.save_excludes_btn = QPushButton("保存排除")
+        self.save_excludes_btn = QPushButton("Save Excludes")
         self.save_excludes_btn.clicked.connect(self._save_excludes)
         self.save_excludes_btn.setObjectName("SecondaryButton")
 
-        self.scan_now_btn = QPushButton("扫描")
+        self.scan_now_btn = QPushButton("Scan Now")
         self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
         self.scan_now_btn.setObjectName("SecondaryButton")
 
-        self.delete_library_btn = QPushButton("删除")
+        self.delete_library_btn = QPushButton("Delete")
         self.delete_library_btn.clicked.connect(self._delete_current_library)
         self.delete_library_btn.setObjectName("DangerButton")
 
@@ -531,9 +228,9 @@ class MainWindow(QMainWindow):
         content_header = QHBoxLayout()
         title_column = QVBoxLayout()
         title_column.setSpacing(2)
-        self.album_title = QLabel("默认相册")
+        self.album_title = QLabel("Default Album")
         self.album_title.setObjectName("AlbumTitle")
-        self.album_subtitle = QLabel("0 张照片")
+        self.album_subtitle = QLabel("0 photos")
         self.album_subtitle.setObjectName("AlbumSubtitle")
         title_column.addWidget(self.album_title)
         title_column.addWidget(self.album_subtitle)
@@ -996,10 +693,10 @@ class MainWindow(QMainWindow):
         multi = len(items) > 1
 
         menu = QMenu(self)
-        open_action = menu.addAction("打开选中" if multi else "打开")
-        reveal_action = menu.addAction("在文件夹中显示" if multi else "显示所在文件夹")
-        copy_file_action = menu.addAction(f"复制 {len(items)} 个文件" if multi else "复制文件")
-        copy_path_action = menu.addAction(f"复制 {len(items)} 个路径" if multi else "复制路径")
+        open_action = menu.addAction("Open selected" if multi else "Open")
+        reveal_action = menu.addAction("Show in folder")
+        copy_file_action = menu.addAction(f"Copy {len(items)} files" if multi else "Copy file")
+        copy_path_action = menu.addAction(f"Copy {len(items)} paths" if multi else "Copy path")
         chosen = menu.exec(self.view.viewport().mapToGlobal(position))
         if chosen == open_action:
             self._open_files([item.file_path for item in items])
@@ -1091,11 +788,11 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            if self._search_mode in ("Filename", "文件名"):
+            if self._search_mode in ("Filename", "File Name"):
                 rows = self.db.search_files_by_name(self.library_id, query, limit=200)
                 self.gallery_model.set_search_results(self.library_id, rows)
             else:
-                mode = "mixed" if self._search_mode in ("Mixed", "混合") else "semantic"
+                mode = "mixed" if self._search_mode in ("Mixed", "Hybrid") else "semantic"
                 file_ids, score_map, _source_map = self.search_service.search(self.library_id, query, mode=mode, limit=200)
                 rows = self.db.list_files_by_ids(self.library_id, file_ids)
                 self.gallery_model.set_search_results(self.library_id, rows, score_map=score_map)
@@ -1110,7 +807,7 @@ class MainWindow(QMainWindow):
             self.analyzed_card.set_value("0")
             self.error_card.set_value("0")
             self.people_count.setText("0")
-            self.album_subtitle.setText("0 张照片")
+            self.album_subtitle.setText("0 photos")
             return
         stats = self.db.get_library_stats(self.library_id)
         self.total_card.set_value(str(stats["total_files"] or 0))
@@ -1119,7 +816,7 @@ class MainWindow(QMainWindow):
         self.error_card.set_value(str(stats["error_files"] or 0))
         total_files = int(stats["total_files"] or 0)
         self.people_count.setText(str(total_files))
-        self.album_subtitle.setText(f"{total_files} 张照片")
+        self.album_subtitle.setText(f"{total_files} photos")
 
     def _selected_library_id(self):
         item = self.library_list.currentItem()
@@ -1161,7 +858,7 @@ class MainWindow(QMainWindow):
             self.root_path = ""
             self.library_label.setText("未选择相册")
             self.album_title.setText("默认相册")
-            self.album_subtitle.setText("0 张照片")
+            self.album_subtitle.setText("0 photos")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
             self._set_details_visible(False)
@@ -1183,7 +880,7 @@ class MainWindow(QMainWindow):
         for row in libraries:
             label = str(row["root_path"])
             display_name = Path(label).name or label
-            item = QListWidgetItem(f"▣  {display_name}")
+            item = QListWidgetItem(f"• {display_name}")
             item.setToolTip(label)
             item.setData(Qt.UserRole, int(row["id"]))
             self.library_list.addItem(item)
@@ -1198,7 +895,7 @@ class MainWindow(QMainWindow):
                     self.root_path = ""
                     self.library_label.setText("未选择相册")
                     self.album_title.setText("默认相册")
-                    self.album_subtitle.setText("0 张照片")
+                    self.album_subtitle.setText("0 photos")
                     self.view.setModel(None)
                     self.details_panel.set_item(None, [])
                     self._set_details_visible(False)
@@ -1209,7 +906,7 @@ class MainWindow(QMainWindow):
             self.root_path = ""
             self.library_label.setText("未选择相册")
             self.album_title.setText("默认相册")
-            self.album_subtitle.setText("0 张照片")
+            self.album_subtitle.setText("0 photos")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
             self._set_details_visible(False)
@@ -1220,7 +917,7 @@ class MainWindow(QMainWindow):
         self.library_id = library_id
         self.root_path = root_path
         self.library_label.setText(root_path)
-        self.album_title.setText(Path(root_path).name or "默认相册")
+        self.album_title.setText(Path(root_path).name or "Default Album")
         if hasattr(self, "gallery_model"):
             self.gallery_model.shutdown()
         self.gallery_model = GalleryModel(self.db, library_id)
