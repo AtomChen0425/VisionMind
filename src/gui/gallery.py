@@ -179,7 +179,7 @@ class GalleryModel(QAbstractListModel):
         self._total_count = self.db.count_library_files(library_id)
         self._items = []
         self._thumb_requests.clear()
-        self._thumb_cache.clear()
+        # self._thumb_cache.clear()
         self.endResetModel()
         self.fetchMore(QModelIndex())
 
@@ -189,7 +189,7 @@ class GalleryModel(QAbstractListModel):
         self._total_count = len(rows)
         self._items = []
         self._thumb_requests.clear()
-        self._thumb_cache.clear()
+        # self._thumb_cache.clear()
         score_map = score_map or {}
         for row in rows:
             file_id = int(row["id"])
@@ -206,7 +206,7 @@ class GalleryModel(QAbstractListModel):
                     last_error=row["last_error"],
                     xmp_state=str(row["xmp_state"] or "not_written"),
                     deleted_at=row["deleted_at"],
-                    thumbnail=None,
+                    thumbnail=self._thumb_cache.get(file_id),
                 )
             )
         self.endResetModel()
