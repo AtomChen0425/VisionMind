@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 from fractions import Fraction
 import logging
+import json
 from pathlib import Path
 from typing import Any
 from .exiftool_manager import ExifToolManager

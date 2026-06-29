@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QMenu,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QTreeWidget,
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
 from src.core.analyzer import AnalysisService, OpenClipAnalyzer
 from src.core.database import DatabaseManager
 from src.core.logging_utils import setup_logging
-from src.core.metadata_reader import read_image_metadata
+from src.core.metadata_reader import read_image_metadata,extract_keywords
 from src.core.semantic_search import SemanticSearchService
 from src.core.pipeline import PhotoProcessingPipeline
 from src.core.exiftool_metadata import ExifToolTagWriter
@@ -106,9 +107,19 @@ class DetailsPanel(QFrame):
         self.relative_path = QLabel("-")
         self.status = QLabel("-")
         self.metadata_state = QLabel("-")
-        self.tags = QTextEdit()
-        self.tags.setReadOnly(True)
-        self.tags.setMinimumHeight(180)
+        self.tags_scroll = QScrollArea()
+        self.tags_scroll.setWidgetResizable(True)
+        self.tags_scroll.setFrameShape(QFrame.NoFrame)
+        self.tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.tags_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.tags_scroll.setFixedHeight(32)
+        self.tags_body = QWidget()
+        self.tags_layout = QHBoxLayout(self.tags_body)
+        self.tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.tags_layout.setSpacing(6)
+        self.tags_layout.addStretch(1)
+        self.tags_scroll.setWidget(self.tags_body)
         self.metadata_tree = QTreeWidget()
         self.metadata_tree.setColumnCount(2)
         self.metadata_tree.setHeaderLabels(["字段", "值"])
@@ -126,7 +137,7 @@ class DetailsPanel(QFrame):
         layout.addWidget(self._label_block("相对路径", self.relative_path))
         layout.addWidget(self._label_block("状态", self.status))
         layout.addWidget(self._label_block("元数据", self.metadata_state))
-        layout.addWidget(self._label_block("标签", self.tags))
+        layout.addWidget(self._label_block("标签", self.tags_scroll))
         layout.addWidget(self._label_block("图片信息", self.metadata_tree))
 
     def _label_block(self, title: str, widget: QWidget):
@@ -149,7 +160,7 @@ class DetailsPanel(QFrame):
             self.relative_path.setText("-")
             self.status.setText("-")
             self.metadata_state.setText("-")
-            self.tags.setPlainText("")
+            self._set_keyword_chips([])
             self.metadata_tree.clear()
             self.metadata_tree.addTopLevelItem(QTreeWidgetItem(["选择照片后显示结构化元数据", ""]))
             return
@@ -166,11 +177,7 @@ class DetailsPanel(QFrame):
         else:
             self.status.setText(item.status)
         self.metadata_state.setText(item.xmp_state)
-        if tags:
-            text = "\n".join(f"{row['tag_name']}  ({row['confidence']:.2f})" for row in tags)
-        else:
-            text = "暂无标签"
-        self.tags.setPlainText(text)
+        self._set_keyword_chips([str(row) for row in tags])
         try:
             metadata = read_image_metadata(item.file_path)
             self._set_metadata_tree(metadata)
@@ -204,6 +211,31 @@ class DetailsPanel(QFrame):
             self.metadata_tree.addTopLevelItem(section_item)
 
         self.metadata_tree.expandAll()
+
+    def _set_keyword_chips(self, keywords: list[str]):
+        while self.tags_layout.count():
+            child = self.tags_layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if not keywords:
+            empty = QLabel("暂无关键词")
+            empty.setObjectName("KeywordEmpty")
+            empty.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self.tags_layout.addWidget(empty)
+            self.tags_layout.addStretch(1)
+            return
+
+        for keyword in keywords:
+            chip = QLabel(keyword)
+            chip.setObjectName("KeywordChip")
+            chip.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            chip.setWordWrap(False)
+            chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self.tags_layout.addWidget(chip)
+
+        self.tags_layout.addStretch(1)
 
     def _format_metadata_value(self, value):
         if value is None:
@@ -672,6 +704,23 @@ class MainWindow(QMainWindow):
                 background: #dceaff;
                 color: #1f4f93;
             }
+            QLabel#KeywordChip {
+                background: #f7f8fa;
+                color: #344054;
+                border: 1px solid #e3e7ee;
+                border-radius: 10px;
+                padding: 0px 6px;
+                font-size: 9px;
+                font-weight: 500;
+            }
+            QLabel#KeywordEmpty {
+                color: #8a97ab;
+                background: #f6f8fb;
+                border: 1px dashed #d8e2ee;
+                border-radius: 10px;
+                padding: 0px 6px;
+                font-size: 9px;
+            }
             QHeaderView::section {
                 background: #f1f5fa;
                 color: #5f7189;
@@ -1076,7 +1125,7 @@ class MainWindow(QMainWindow):
             self.details_panel.set_item(None, [])
             self.details_panel.hide()
             return
-        tags = self.db.list_tags_for_file(item.file_id)
+        tags=  extract_keywords(read_image_metadata(item.file_path))
         self.details_panel.set_item(item, tags)
         self.details_panel.show()
 
