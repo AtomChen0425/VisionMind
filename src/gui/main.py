@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -38,6 +39,7 @@ from src.core.scanner import Scanner
 from src.core.vector_index import VectorIndexManager
 from src.gui.automation import AutoLibraryController
 from src.gui.gallery import GalleryModel
+from src.gui.settings_dialog import AppSettings, SettingsDialog
 
 
 from src.gui.widgets import DetailsPanel, StatCard
@@ -55,7 +57,18 @@ class MainWindow(QMainWindow):
         self.logger.info("Application starting")
         self.db = DatabaseManager("data/photo_manager.db")
         self.scanner = Scanner(self.db)
-        self.analyzer = OpenClipAnalyzer()
+
+        self.settings = QSettings("PhotoManager", "PhotoManager")
+        self.ui_language = self.settings.value("ui/language", "en", str)
+        self.analyzer_model_name = self.settings.value("analyzer/model_name", "ViT-B-32", str)
+        self.analyzer_pretrained = self.settings.value("analyzer/pretrained", "laion2b_s34b_b79k", str)
+        self.analyzer_probability_threshold = float(self.settings.value("analyzer/probability_threshold", 0.2))
+
+        self.analyzer = OpenClipAnalyzer(
+            model_name=self.analyzer_model_name,
+            pretrained=self.analyzer_pretrained,
+            probability_threshold=self.analyzer_probability_threshold,
+        )
         self.logger.info("open_clip cache root=%s", self.analyzer.model_cache_root)
         self.analysis_service = AnalysisService(self.analyzer)
         self.vector_index = VectorIndexManager(self.db)
@@ -63,16 +76,16 @@ class MainWindow(QMainWindow):
         self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter(), self.vector_index)
         self.controller = AutoLibraryController(self.db, self.scanner, self.pipeline)
 
-        self.settings = QSettings("PhotoManager", "PhotoManager")
         self.library_id: int | None = None
         self.root_path: str = ""
         self._updating_library_list = False
-        self._search_mode = "Mixed"
+        self._search_mode_key = "mixed"
         self._details_panel_width = 380
 
         self._build_ui()
         self._bind_signals()
         self._apply_style()
+        self._apply_language()
         self._refresh_exiftool_status()
         self.controller.refresh_libraries()
 
@@ -83,7 +96,7 @@ class MainWindow(QMainWindow):
             self.library_list.setCurrentRow(0)
             self._select_library_by_row(0)
         else:
-            self.status_label.setText("Choose a library to start automatic import monitoring")
+            self.status_label.setText(self._ui_text("choose_library_prompt"))
 
     def _build_ui(self):
         central = QWidget()
@@ -93,7 +106,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
 
         self.search_mode = QComboBox()
-        self.search_mode.addItems(["Mixed", "Filename", "Semantic"])
+        self._populate_search_mode_combo()
         self.search_mode.currentTextChanged.connect(self._on_search_mode_changed)
 
         self.search_box = QLineEdit()
@@ -116,7 +129,8 @@ class MainWindow(QMainWindow):
         self.title_label.setObjectName("AppTitle")
         self.settings_btn = QPushButton("⚙")
         self.settings_btn.setObjectName("IconButton")
-        self.settings_btn.setEnabled(False)
+        self.settings_btn.clicked.connect(self._open_settings_dialog)
+        self.settings_btn.setEnabled(True)
         brand_row.addWidget(self.title_label, 3)
         brand_row.addWidget(self.settings_btn)
         left_layout.addLayout(brand_row)
@@ -138,12 +152,12 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(divider)
 
         group_header = QHBoxLayout()
-        group_title = QLabel("分组")
-        group_title.setObjectName("SectionLabel")
+        self.group_title = QLabel("分组")
+        self.group_title.setObjectName("SectionLabel")
         self.choose_btn = QPushButton("➕")
         self.choose_btn.clicked.connect(self.choose_library)
         self.choose_btn.setObjectName("SmallIconButton")
-        group_header.addWidget(group_title, 1)
+        group_header.addWidget(self.group_title, 1)
         group_header.addWidget(self.choose_btn)
         left_layout.addLayout(group_header)
 
@@ -286,10 +300,10 @@ class MainWindow(QMainWindow):
     def _bind_signals(self):
         self.controller.libraries_changed.connect(self._on_libraries_changed)
         self.controller.active_library_changed.connect(self._on_active_library_changed)
-        self.controller.scan_started.connect(lambda library_id, root_path: self._set_status(f"Scanning {root_path} in the background..."))
+        self.controller.scan_started.connect(lambda library_id, root_path: self._set_status(self._ui_text("scanning").format(root_path=root_path)))
         self.controller.scan_started.connect(lambda *_: self._update_library_action_state())
         self.controller.scan_finished.connect(self._on_scan_finished)
-        self.controller.analysis_started.connect(lambda library_id, root_path: self._set_status(f"Analyzing new and changed photos in {root_path}..."))
+        self.controller.analysis_started.connect(lambda library_id, root_path: self._set_status(self._ui_text("analyzing").format(root_path=root_path)))
         self.controller.analysis_started.connect(lambda *_: self._update_library_action_state())
         self.controller.analysis_finished.connect(self._on_analysis_finished)
         self.controller.message.connect(self._set_status)
@@ -312,6 +326,194 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str):
         self.status_label.setText(text)
+
+    def _ui_text(self, key: str) -> str:
+        translations = {
+            "en": {
+                "title": "AI Gallery",
+                "people": "People",
+                "group_title": "Libraries",
+                "add": "Add",
+                "no_library_selected": "No library selected",
+                "idle": "Idle",
+                "save_excludes": "Save Excludes",
+                "scan_now": "Scan Now",
+                "delete": "Delete",
+                "default_album": "Default Album",
+                "search": "Search",
+                "search_placeholder": 'Search photos, e.g. "sunset by the sea" or "group portrait"',
+                "search_mode_mixed": "Mixed",
+                "search_mode_filename": "Filename",
+                "search_mode_semantic": "Semantic",
+                "total": "Total",
+                "pending": "Pending",
+                "analyzed": "Analyzed",
+                "errors": "Errors",
+                "settings_title": "Settings",
+                "settings_busy": "Please wait until the current scan or analysis finishes.",
+                "settings_saved": "Settings saved",
+                "choose_library_prompt": "Choose a library to start automatic import monitoring",
+                "library_added": "Library added",
+                "scanning": "Scanning {root_path} in the background...",
+                "analyzing": "Analyzing new and changed photos in {root_path}...",
+                "scan_complete": "Scan complete: {root_path} | {seen} seen, {changed} changed, {deleted} deleted",
+                "analysis_complete": "Analysis complete: {count} files processed",
+                "exclude_saved": "Exclude paths saved",
+                "manual_scan_started": "Manual scan started",
+                "library_deleted": "Library deleted",
+                "search_failed": "Search failed: {error}",
+                "delete_library_title": "Delete Library",
+                "delete_library_message": "Delete the selected library?\n\n{root_path}",
+                "delete_library_failed_title": "Delete Library Failed",
+                "open": "Open",
+                "open_selected": "Open selected",
+                "show_in_folder": "Show in folder",
+                "copy_file": "Copy file",
+                "copy_files": "Copy {count} files",
+                "copy_path": "Copy path",
+                "copy_paths": "Copy {count} paths",
+            },
+            "zh": {
+                "title": "AI 相册",
+                "people": "人物",
+                "group_title": "分组",
+                "add": "添加",
+                "no_library_selected": "未选择相册",
+                "idle": "空闲",
+                "save_excludes": "保存排除",
+                "scan_now": "手动扫描",
+                "delete": "删除",
+                "default_album": "默认相册",
+                "search": "搜索",
+                "search_placeholder": '文字搜图，例如“海边日落”“多人合影”',
+                "search_mode_mixed": "混合",
+                "search_mode_filename": "文件名",
+                "search_mode_semantic": "语义",
+                "total": "总数",
+                "pending": "待处理",
+                "analyzed": "已分析",
+                "errors": "错误",
+                "settings_title": "设置",
+                "settings_busy": "请等待当前扫描或分析结束。",
+                "settings_saved": "设置已保存",
+                "choose_library_prompt": "选择一个相册开始自动监控导入",
+                "library_added": "已添加相册",
+                "scanning": "正在后台扫描 {root_path}...",
+                "analyzing": "正在分析 {root_path} 中新增或变化的照片...",
+                "scan_complete": "扫描完成：{root_path} | 发现 {seen} 张，变更 {changed} 张，删除 {deleted} 张",
+                "analysis_complete": "分析完成：已处理 {count} 个文件",
+                "exclude_saved": "排除路径已保存",
+                "manual_scan_started": "已开始手动扫描",
+                "library_deleted": "相册已删除",
+                "search_failed": "搜索失败：{error}",
+                "delete_library_title": "删除相册",
+                "delete_library_message": "删除所选相册？\n\n{root_path}",
+                "delete_library_failed_title": "删除相册失败",
+                "open": "打开",
+                "open_selected": "打开所选",
+                "show_in_folder": "在文件夹中显示",
+                "copy_file": "复制文件",
+                "copy_files": "复制 {count} 个文件",
+                "copy_path": "复制路径",
+                "copy_paths": "复制 {count} 条路径",
+            },
+        }
+        return translations.get(self.ui_language, translations["en"]).get(key, key)
+
+    def _apply_language(self):
+        current_search_mode = self._search_mode_key
+        self.title_label.setText(self._ui_text("title"))
+        self.people_label.setText(self._ui_text("people"))
+        self.group_title.setText(self._ui_text("group_title"))
+        self.choose_btn.setText(self._ui_text("add"))
+        self.save_excludes_btn.setText(self._ui_text("save_excludes"))
+        self.scan_now_btn.setText(self._ui_text("scan_now"))
+        self.delete_library_btn.setText(self._ui_text("delete"))
+        self.search_btn.setText(self._ui_text("search"))
+        self.search_box.setPlaceholderText(self._ui_text("search_placeholder"))
+        self.total_card.title.setText(self._ui_text("total"))
+        self.pending_card.title.setText(self._ui_text("pending"))
+        self.analyzed_card.title.setText(self._ui_text("analyzed"))
+        self.error_card.title.setText(self._ui_text("errors"))
+        self._populate_search_mode_combo(current_search_mode)
+        if self.library_id is None:
+            self.library_label.setText(self._ui_text("no_library_selected"))
+            self.album_title.setText(self._ui_text("default_album"))
+            self.album_subtitle.setText("0 photos")
+            self.status_label.setText(self._ui_text("idle"))
+        self.details_panel.set_language(self.ui_language)
+
+    def _populate_search_mode_combo(self, selected_key: str | None = None):
+        selected_key = selected_key or self._search_mode_key
+        labels = {
+            "mixed": self._ui_text("search_mode_mixed"),
+            "filename": self._ui_text("search_mode_filename"),
+            "semantic": self._ui_text("search_mode_semantic"),
+        }
+        self.search_mode.blockSignals(True)
+        self.search_mode.clear()
+        self.search_mode.addItem(labels["mixed"], "mixed")
+        self.search_mode.addItem(labels["filename"], "filename")
+        self.search_mode.addItem(labels["semantic"], "semantic")
+        index = self.search_mode.findData(selected_key)
+        if index >= 0:
+            self.search_mode.setCurrentIndex(index)
+        self.search_mode.blockSignals(False)
+        self._search_mode_key = str(self.search_mode.currentData() or "mixed")
+
+    def _rebuild_runtime_stack(self):
+        self.analyzer = OpenClipAnalyzer(
+            model_name=self.analyzer_model_name,
+            pretrained=self.analyzer_pretrained,
+            probability_threshold=self.analyzer_probability_threshold,
+        )
+        self.logger.info("open_clip cache root=%s", self.analyzer.model_cache_root)
+        self.analysis_service = AnalysisService(self.analyzer)
+        self.search_service = SemanticSearchService(self.db, self.analysis_service, self.vector_index)
+        self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter(), self.vector_index)
+        self.controller.pipeline = self.pipeline
+
+    def _open_settings_dialog(self):
+        if self.controller.scan_running or self.controller.analysis_running:
+            QMessageBox.information(self, self._ui_text("settings_title"), self._ui_text("settings_busy"))
+            return
+
+        dialog = SettingsDialog(
+            self,
+            settings=AppSettings(
+                probability_threshold=self.analyzer_probability_threshold,
+                model_name=self.analyzer_model_name,
+                pretrained=self.analyzer_pretrained,
+                language=self.ui_language,
+            ),
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        values = dialog.values()
+        changed_analyzer = (
+            values.probability_threshold != self.analyzer_probability_threshold
+            or values.model_name != self.analyzer_model_name
+            or values.pretrained != self.analyzer_pretrained
+        )
+        changed_language = values.language != self.ui_language
+
+        self.analyzer_probability_threshold = values.probability_threshold
+        self.analyzer_model_name = values.model_name
+        self.analyzer_pretrained = values.pretrained
+        self.ui_language = values.language
+
+        self.settings.setValue("analyzer/probability_threshold", self.analyzer_probability_threshold)
+        self.settings.setValue("analyzer/model_name", self.analyzer_model_name)
+        self.settings.setValue("analyzer/pretrained", self.analyzer_pretrained)
+        self.settings.setValue("ui/language", self.ui_language)
+
+        if changed_analyzer:
+            self._rebuild_runtime_stack()
+            self._refresh_exiftool_status()
+        if changed_language:
+            self._apply_language()
+        self._set_status(self._ui_text("settings_saved"))
 
     def _set_details_visible(self, visible: bool):
         if not hasattr(self, "content_splitter"):
@@ -388,10 +590,10 @@ class MainWindow(QMainWindow):
         multi = len(items) > 1
 
         menu = QMenu(self)
-        open_action = menu.addAction("Open selected" if multi else "Open")
-        reveal_action = menu.addAction("Show in folder")
-        copy_file_action = menu.addAction(f"Copy {len(items)} files" if multi else "Copy file")
-        copy_path_action = menu.addAction(f"Copy {len(items)} paths" if multi else "Copy path")
+        open_action = menu.addAction(self._ui_text("open_selected") if multi else self._ui_text("open"))
+        reveal_action = menu.addAction(self._ui_text("show_in_folder"))
+        copy_file_action = menu.addAction(self._ui_text("copy_files").format(count=len(items)) if multi else self._ui_text("copy_file"))
+        copy_path_action = menu.addAction(self._ui_text("copy_paths").format(count=len(items)) if multi else self._ui_text("copy_path"))
         chosen = menu.exec(self.view.viewport().mapToGlobal(position))
         if chosen == open_action:
             self._open_files([item.file_path for item in items])
@@ -440,6 +642,7 @@ class MainWindow(QMainWindow):
         self.scan_now_btn.setEnabled(has_library and not busy)
         self.delete_library_btn.setEnabled(has_library and not busy)
         self.save_excludes_btn.setEnabled(has_library and not busy)
+        self.settings_btn.setEnabled(not busy)
 
     def _refresh_exiftool_status(self):
         writer = getattr(self.pipeline, "metadata_writer", None)
@@ -472,7 +675,8 @@ class MainWindow(QMainWindow):
         self._update_library_action_state()
 
     def _on_search_mode_changed(self, mode: str):
-        self._search_mode = mode
+        selected = self.search_mode.currentData()
+        self._search_mode_key = str(selected or "mixed")
 
     def _execute_search(self):
         if self.library_id is None or not hasattr(self, "gallery_model"):
@@ -483,17 +687,17 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            if self._search_mode in ("Filename", "File Name"):
+            if self._search_mode_key == "filename":
                 rows = self.db.search_files_by_name(self.library_id, query, limit=200)
                 self.gallery_model.set_search_results(self.library_id, rows)
             else:
-                mode = "mixed" if self._search_mode in ("Mixed", "Hybrid") else "semantic"
+                mode = self._search_mode_key if self._search_mode_key in ("mixed", "semantic") else "mixed"
                 file_ids, score_map, _source_map = self.search_service.search(self.library_id, query, mode=mode, limit=200)
                 rows = self.db.list_files_by_ids(self.library_id, file_ids)
                 self.gallery_model.set_search_results(self.library_id, rows, score_map=score_map)
             self.view.setModel(self.gallery_model)
         except Exception as exc:
-            self._set_status(f"Search failed: {exc}")
+            self._set_status(self._ui_text("search_failed").format(error=exc))
 
     def _refresh_stats(self):
         if self.library_id is None:
@@ -533,7 +737,7 @@ class MainWindow(QMainWindow):
         library_id = self.controller.add_library(root_path)
         self.settings.setValue("lastLibraryPath", str(Path(root_path).resolve()))
         if not from_startup:
-            self._set_status(f"Library added: {root_path}")
+            self._set_status(f"{self._ui_text('library_added')}: {root_path}")
         self._select_library(library_id)
 
     def _select_library(self, library_id: int):
@@ -551,8 +755,8 @@ class MainWindow(QMainWindow):
         if item is None:
             self.library_id = None
             self.root_path = ""
-            self.library_label.setText("未选择相册")
-            self.album_title.setText("默认相册")
+            self.library_label.setText(self._ui_text("no_library_selected"))
+            self.album_title.setText(self._ui_text("default_album"))
             self.album_subtitle.setText("0 photos")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
@@ -564,7 +768,7 @@ class MainWindow(QMainWindow):
         self.controller.set_active_library(library_id)
 
     def choose_library(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select photo library")
+        directory = QFileDialog.getExistingDirectory(self, self._ui_text("choose_library_prompt"))
         if directory:
             self._select_or_add_library(directory)
 
@@ -588,8 +792,8 @@ class MainWindow(QMainWindow):
                 if self.library_list.count() == 0:
                     self.library_id = None
                     self.root_path = ""
-                    self.library_label.setText("Unselected library")
-                    self.album_title.setText("Default Album")
+                    self.library_label.setText(self._ui_text("no_library_selected"))
+                    self.album_title.setText(self._ui_text("default_album"))
                     self.album_subtitle.setText("0 photos")
                     self.view.setModel(None)
                     self.details_panel.set_item(None, [])
@@ -599,8 +803,8 @@ class MainWindow(QMainWindow):
         if not libraries:
             self.library_id = None
             self.root_path = ""
-            self.library_label.setText("Unselected library")
-            self.album_title.setText("Default Album")
+            self.library_label.setText(self._ui_text("no_library_selected"))
+            self.album_title.setText(self._ui_text("default_album"))
             self.album_subtitle.setText("0 photos")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
@@ -612,7 +816,7 @@ class MainWindow(QMainWindow):
         self.library_id = library_id
         self.root_path = root_path
         self.library_label.setText(root_path)
-        self.album_title.setText(Path(root_path).name or "Default Album")
+        self.album_title.setText(Path(root_path).name or self._ui_text("default_album"))
         if hasattr(self, "gallery_model"):
             self.gallery_model.shutdown()
         self.gallery_model = GalleryModel(self.db, library_id)
@@ -632,7 +836,12 @@ class MainWindow(QMainWindow):
             if self.search_box.text().strip():
                 self._execute_search()
         self._set_status(
-            f"Scan complete: {summary.root_path} | {summary.files_seen} seen, {summary.files_added + summary.files_updated} changed, {summary.files_deleted} deleted"
+            self._ui_text("scan_complete").format(
+                root_path=summary.root_path,
+                seen=summary.files_seen,
+                changed=summary.files_added + summary.files_updated,
+                deleted=summary.files_deleted,
+            )
         )
 
     def _on_analysis_finished(self, outcomes):
@@ -641,7 +850,7 @@ class MainWindow(QMainWindow):
             if self.search_box.text().strip():
                 self._execute_search()
         self._refresh_exiftool_status()
-        self._set_status(f"Analysis complete: {len(outcomes)} files processed")
+        self._set_status(self._ui_text("analysis_complete").format(count=len(outcomes)))
 
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex):
         if not current.isValid():
@@ -662,7 +871,7 @@ class MainWindow(QMainWindow):
             return
         paths = [line.strip() for line in self.excludes_box.toPlainText().splitlines() if line.strip()]
         self.controller.set_library_excludes(self.library_id, paths)
-        self._set_status("Exclude paths saved")
+        self._set_status(self._ui_text("exclude_saved"))
 
     def _manual_scan_current_library(self):
         if self.library_id is None:
@@ -670,7 +879,7 @@ class MainWindow(QMainWindow):
         self.logger.info("Manual scan requested for library_id=%s root_path=%s", self.library_id, self.root_path)
         self.controller.scan_library(self.library_id)
         self._update_library_action_state()
-        self._set_status("Manual scan started")
+        self._set_status(self._ui_text("manual_scan_started"))
 
     def _delete_current_library(self):
         if self.library_id is None:
@@ -678,8 +887,8 @@ class MainWindow(QMainWindow):
         library_id = self.library_id
         response = QMessageBox.question(
             self,
-            "Delete Library",
-            f"Delete the selected library?\n\n{self.root_path}",
+            self._ui_text("delete_library_title"),
+            self._ui_text("delete_library_message").format(root_path=self.root_path),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -691,9 +900,9 @@ class MainWindow(QMainWindow):
             self.vector_index.delete_library_indexes(library_id)
         except Exception as exc:
             self.logger.exception("Failed to delete library_id=%s", library_id)
-            QMessageBox.critical(self, "Delete Library Failed", str(exc))
+            QMessageBox.critical(self, self._ui_text("delete_library_failed_title"), str(exc))
             return
-        self._set_status("Library deleted")
+        self._set_status(self._ui_text("library_deleted"))
         self._update_library_action_state()
 
     def closeEvent(self, event):

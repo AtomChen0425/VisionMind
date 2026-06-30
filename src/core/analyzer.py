@@ -62,10 +62,12 @@ class OpenClipAnalyzer:
         *,
         model_name: str = "ViT-B-32",
         pretrained: str = "laion2b_s34b_b79k",
+        probability_threshold: float = PROTABILITY_THRESHOLD,
         device: str | None = None,
     ):
         self.model_name = model_name
         self.pretrained = pretrained
+        self.probability_threshold = float(probability_threshold)
         self._device_name = device
         self.model_cache_root = configure_model_cache()
         self._model = None
@@ -171,7 +173,7 @@ class OpenClipAnalyzer:
             sorted_indexes = np.argsort(row_probabilities)[::-1]
             valid_indexes = [
                 idx for idx in sorted_indexes 
-                if float(row_probabilities[idx]) > PROTABILITY_THRESHOLD
+                if float(row_probabilities[idx]) > self.probability_threshold
             ][: max(1, top_k)]
             tags = [
                 TagPrediction(tag_name=raw_labels[index], confidence=float(row_probabilities[index]))
