@@ -55,10 +55,31 @@ QFrame#LibraryTools {
     border: 1px solid #e1e8f2;
     border-radius: 8px;
 }
+QFrame#SettingsShell {
+    background: qlineargradient(spread:pad, x1:0, y1:0, x2:0, y2:1, stop:0 #f7faff, stop:1 #f2f6fc);
+}
+QFrame#SettingsHeader {
+    background: transparent;
+    border: none;
+}
+QFrame#SettingsCard {
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid #dfe7f1;
+    border-radius: 14px;
+}
 QLabel#AppTitle {
     font-size: 15px;
     font-weight: 800;
     color: #172033;
+}
+QLabel#DialogTitle {
+    color: #172033;
+    font-size: 20px;
+    font-weight: 800;
+}
+QLabel#DialogSubtitle {
+    color: #64748b;
+    font-size: 12px;
 }
 QLabel#AlbumTitle {
     color: #121a2b;
@@ -84,6 +105,15 @@ QLabel#StatusLabel {
 }
 QLabel#LibraryPathLabel {
     color: #475569;
+    font-size: 11px;
+}
+QLabel#SettingsHint {
+    color: #64748b;
+    font-size: 11px;
+    padding-top: 2px;
+}
+QLabel#SettingsFooterNote {
+    color: #6f7d91;
     font-size: 11px;
 }
 QLabel#ExifToolStatusTag {

@@ -38,6 +38,7 @@ from src.core.exiftool_metadata import ExifToolTagWriter
 from src.core.scanner import Scanner
 from src.core.vector_index import VectorIndexManager
 from src.gui.automation import AutoLibraryController
+from src.gui.i18n import normalize_language, tr
 from src.gui.gallery import GalleryModel
 from src.gui.settings_dialog import AppSettings, SettingsDialog
 
@@ -59,7 +60,7 @@ class MainWindow(QMainWindow):
         self.scanner = Scanner(self.db)
 
         self.settings = QSettings("PhotoManager", "PhotoManager")
-        self.ui_language = self.settings.value("ui/language", "en", str)
+        self.ui_language = normalize_language(self.settings.value("ui/language", "en", str))
         self.analyzer_model_name = self.settings.value("analyzer/model_name", "ViT-B-32", str)
         self.analyzer_pretrained = self.settings.value("analyzer/pretrained", "laion2b_s34b_b79k", str)
         self.analyzer_probability_threshold = float(self.settings.value("analyzer/probability_threshold", 0.2))
@@ -328,100 +329,11 @@ class MainWindow(QMainWindow):
         self.status_label.setText(text)
 
     def _ui_text(self, key: str) -> str:
-        translations = {
-            "en": {
-                "title": "AI Gallery",
-                "people": "People",
-                "group_title": "Libraries",
-                "add": "Add",
-                "no_library_selected": "No library selected",
-                "idle": "Idle",
-                "save_excludes": "Save Excludes",
-                "scan_now": "Scan Now",
-                "delete": "Delete",
-                "default_album": "Default Album",
-                "search": "Search",
-                "search_placeholder": 'Search photos, e.g. "sunset by the sea" or "group portrait"',
-                "search_mode_mixed": "Mixed",
-                "search_mode_filename": "Filename",
-                "search_mode_semantic": "Semantic",
-                "total": "Total",
-                "pending": "Pending",
-                "analyzed": "Analyzed",
-                "errors": "Errors",
-                "settings_title": "Settings",
-                "settings_busy": "Please wait until the current scan or analysis finishes.",
-                "settings_saved": "Settings saved",
-                "choose_library_prompt": "Choose a library to start automatic import monitoring",
-                "library_added": "Library added",
-                "scanning": "Scanning {root_path} in the background...",
-                "analyzing": "Analyzing new and changed photos in {root_path}...",
-                "scan_complete": "Scan complete: {root_path} | {seen} seen, {changed} changed, {deleted} deleted",
-                "analysis_complete": "Analysis complete: {count} files processed",
-                "exclude_saved": "Exclude paths saved",
-                "manual_scan_started": "Manual scan started",
-                "library_deleted": "Library deleted",
-                "search_failed": "Search failed: {error}",
-                "delete_library_title": "Delete Library",
-                "delete_library_message": "Delete the selected library?\n\n{root_path}",
-                "delete_library_failed_title": "Delete Library Failed",
-                "open": "Open",
-                "open_selected": "Open selected",
-                "show_in_folder": "Show in folder",
-                "copy_file": "Copy file",
-                "copy_files": "Copy {count} files",
-                "copy_path": "Copy path",
-                "copy_paths": "Copy {count} paths",
-            },
-            "zh": {
-                "title": "AI 相册",
-                "people": "人物",
-                "group_title": "分组",
-                "add": "添加",
-                "no_library_selected": "未选择相册",
-                "idle": "空闲",
-                "save_excludes": "保存排除",
-                "scan_now": "手动扫描",
-                "delete": "删除",
-                "default_album": "默认相册",
-                "search": "搜索",
-                "search_placeholder": '文字搜图，例如“海边日落”“多人合影”',
-                "search_mode_mixed": "混合",
-                "search_mode_filename": "文件名",
-                "search_mode_semantic": "语义",
-                "total": "总数",
-                "pending": "待处理",
-                "analyzed": "已分析",
-                "errors": "错误",
-                "settings_title": "设置",
-                "settings_busy": "请等待当前扫描或分析结束。",
-                "settings_saved": "设置已保存",
-                "choose_library_prompt": "选择一个相册开始自动监控导入",
-                "library_added": "已添加相册",
-                "scanning": "正在后台扫描 {root_path}...",
-                "analyzing": "正在分析 {root_path} 中新增或变化的照片...",
-                "scan_complete": "扫描完成：{root_path} | 发现 {seen} 张，变更 {changed} 张，删除 {deleted} 张",
-                "analysis_complete": "分析完成：已处理 {count} 个文件",
-                "exclude_saved": "排除路径已保存",
-                "manual_scan_started": "已开始手动扫描",
-                "library_deleted": "相册已删除",
-                "search_failed": "搜索失败：{error}",
-                "delete_library_title": "删除相册",
-                "delete_library_message": "删除所选相册？\n\n{root_path}",
-                "delete_library_failed_title": "删除相册失败",
-                "open": "打开",
-                "open_selected": "打开所选",
-                "show_in_folder": "在文件夹中显示",
-                "copy_file": "复制文件",
-                "copy_files": "复制 {count} 个文件",
-                "copy_path": "复制路径",
-                "copy_paths": "复制 {count} 条路径",
-            },
-        }
-        return translations.get(self.ui_language, translations["en"]).get(key, key)
+        return tr(self.ui_language, key)
 
     def _apply_language(self):
         current_search_mode = self._search_mode_key
+        self.setWindowTitle(self._ui_text("title"))
         self.title_label.setText(self._ui_text("title"))
         self.people_label.setText(self._ui_text("people"))
         self.group_title.setText(self._ui_text("group_title"))

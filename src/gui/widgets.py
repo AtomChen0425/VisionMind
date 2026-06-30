@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.metadata_reader import read_image_metadata
+from src.gui.i18n import normalize_language, tr
 
 
 class StatCard(QFrame):
@@ -171,52 +172,22 @@ class AspectPreviewLabel(QLabel):
 
 
 class DetailsPanel(QFrame):
-    TRANSLATIONS = {
-        "en": {
-            "section_labels": {
-                "file": "File",
-                "camera": "Camera",
-                "capture": "Capture",
-                "exposure": "Exposure",
-                "lens": "Lens",
-                "location": "Location",
-                "text": "Text",
-                "technical": "Technical",
-            },
-            "preview_empty": "Select photo",
-            "detail_empty": "Select a photo to view details",
-            "field": "Field",
-            "value": "Value",
-            "no_keywords": "No keywords",
-            "no_metadata": "No structured metadata",
-            "status_error": "error: {error}",
-            "metadata_error": "Failed to read metadata: {error}",
-        },
-        "zh": {
-            "section_labels": {
-                "file": "文件",
-                "camera": "相机",
-                "capture": "拍摄",
-                "exposure": "曝光",
-                "lens": "镜头",
-                "location": "位置",
-                "text": "文本",
-                "technical": "技术",
-            },
-            "preview_empty": "选择照片",
-            "detail_empty": "选择照片后显示详情",
-            "field": "字段",
-            "value": "值",
-            "no_keywords": "暂无关键词",
-            "no_metadata": "暂无可显示的结构化元数据",
-            "status_error": "错误: {error}",
-            "metadata_error": "读取元数据失败: {error}",
-        },
+    SECTION_KEYS = {
+        "file": "section_file",
+        "camera": "section_camera",
+        "capture": "section_capture",
+        "exposure": "section_exposure",
+        "lens": "section_lens",
+        "location": "section_location",
+        "text": "section_text",
+        "technical": "section_technical",
     }
 
     def __init__(self):
         super().__init__()
         self._language = "en"
+        self._current_item = None
+        self._current_tags = []
         self.setObjectName("DetailsPanel")
         self.preview = AspectPreviewLabel()
 
@@ -232,53 +203,53 @@ class DetailsPanel(QFrame):
         self.metadata_tree.setIndentation(18)
         self.metadata_tree.header().setStretchLastSection(True)
         self.metadata_tree.setMinimumHeight(200)
+        self._heading_labels: dict[str, QLabel] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
         layout.addWidget(self.preview)
-        layout.addWidget(self._label_block("File", self.path))
-        layout.addWidget(self._label_block("Relative Path", self.relative_path))
-        layout.addWidget(self._label_block("Status", self.status))
-        layout.addWidget(self._label_block("Metadata", self.metadata_state))
-        layout.addWidget(self._label_block("Keywords", self.tags_wrap))
-        layout.addWidget(self._label_block("Image Info", self.metadata_tree))
+        layout.addWidget(self._label_block("file", self.path))
+        layout.addWidget(self._label_block("relative_path", self.relative_path))
+        layout.addWidget(self._label_block("status", self.status))
+        layout.addWidget(self._label_block("metadata", self.metadata_state))
+        layout.addWidget(self._label_block("keywords", self.tags_wrap))
+        layout.addWidget(self._label_block("image_info", self.metadata_tree))
         self._apply_language()
-
-    def _strings(self):
-        return self.TRANSLATIONS.get(self._language, self.TRANSLATIONS["en"])
+        self.set_item(None, [])
 
     def _apply_language(self):
-        strings = self._strings()
         labels = self.metadata_tree.headerItem()
-        labels.setText(0, strings["field"])
-        labels.setText(1, strings["value"])
+        labels.setText(0, tr(self._language, "field"))
+        labels.setText(1, tr(self._language, "value"))
+        for key, heading in self._heading_labels.items():
+            heading.setText(tr(self._language, key))
 
     def set_language(self, language: str):
-        self._language = language if language in self.TRANSLATIONS else "en"
+        self._language = normalize_language(language)
         self._apply_language()
         if hasattr(self, "_current_item"):
             self.set_item(self._current_item, self._current_tags)
 
-    def _label_block(self, title: str, widget: QWidget):
+    def _label_block(self, title_key: str, widget: QWidget):
         container = QFrame()
         container.setObjectName("DetailBlock")
         block_layout = QVBoxLayout(container)
         block_layout.setContentsMargins(0, 0, 0, 0)
         block_layout.setSpacing(4)
-        heading = QLabel(title)
+        heading = QLabel(tr(self._language, title_key))
         heading.setObjectName("DetailHeading")
         block_layout.addWidget(heading)
         block_layout.addWidget(widget)
+        self._heading_labels[title_key] = heading
         return container
 
     def set_item(self, item, tags):
         self._current_item = item
         self._current_tags = list(tags) if tags is not None else []
-        strings = self._strings()
 
         if item is None:
-            self.preview.setText(strings["preview_empty"])
+            self.preview.setText(tr(self._language, "preview_empty"))
             self.preview.set_source_pixmap(None)
             self.path.setText("-")
             self.relative_path.setText("-")
@@ -286,7 +257,7 @@ class DetailsPanel(QFrame):
             self.metadata_state.setText("-")
             self._set_keyword_chips([])
             self.metadata_tree.clear()
-            self.metadata_tree.addTopLevelItem(QTreeWidgetItem([strings["detail_empty"], ""]))
+            self.metadata_tree.addTopLevelItem(QTreeWidgetItem([tr(self._language, "detail_empty"), ""]))
             return
 
         pixmap = item.thumbnail or QPixmap(320, 320)
@@ -297,7 +268,7 @@ class DetailsPanel(QFrame):
         self.path.setText(item.file_path)
         self.relative_path.setText(item.relative_path)
         if item.status == "error" and item.last_error:
-            self.status.setText(strings["status_error"].format(error=item.last_error))
+            self.status.setText(tr(self._language, "status_error", error=item.last_error))
         else:
             self.status.setText(item.status)
         self.metadata_state.setText(item.xmp_state)
@@ -307,19 +278,18 @@ class DetailsPanel(QFrame):
             self._set_metadata_tree(metadata)
         except Exception as exc:
             self.metadata_tree.clear()
-            error_item = QTreeWidgetItem(["Error", strings["metadata_error"].format(error=exc)])
+            error_item = QTreeWidgetItem([tr(self._language, "error"), tr(self._language, "metadata_error", error=exc)])
             self.metadata_tree.addTopLevelItem(error_item)
 
     def _set_metadata_tree(self, metadata: dict):
         self.metadata_tree.clear()
-        strings = self._strings()
         if not metadata:
-            self.metadata_tree.addTopLevelItem(QTreeWidgetItem([strings["no_metadata"], ""]))
+            self.metadata_tree.addTopLevelItem(QTreeWidgetItem([tr(self._language, "no_metadata"), ""]))
             return
 
-        section_labels = self.TRANSLATIONS.get(self._language, self.TRANSLATIONS["en"])["section_labels"]
         for section_name, fields in metadata.items():
-            label = section_labels.get(section_name, section_name)
+            label_key = self.SECTION_KEYS.get(section_name, section_name)
+            label = tr(self._language, label_key) if label_key != section_name else section_name
             section_item = QTreeWidgetItem([label, ""])
             section_font = section_item.font(0)
             section_font.setBold(True)
@@ -332,7 +302,7 @@ class DetailsPanel(QFrame):
                     child = QTreeWidgetItem([str(key), self._format_metadata_value(value)])
                     section_item.addChild(child)
             else:
-                section_item.addChild(QTreeWidgetItem(["Value", self._format_metadata_value(fields)]))
+                section_item.addChild(QTreeWidgetItem([tr(self._language, "value_row"), self._format_metadata_value(fields)]))
 
             self.metadata_tree.addTopLevelItem(section_item)
 
@@ -340,10 +310,9 @@ class DetailsPanel(QFrame):
 
     def _set_keyword_chips(self, keywords: list[str]):
         self.tags_wrap.clear()
-        strings = self._strings()
 
         if not keywords:
-            empty = QLabel(strings["no_keywords"])
+            empty = QLabel(tr(self._language, "no_keywords"))
             empty.setObjectName("KeywordEmpty")
             empty.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             self.tags_wrap.add_widget(empty)
