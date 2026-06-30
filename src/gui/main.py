@@ -43,7 +43,7 @@ from src.gui.gallery import GalleryModel
 from src.gui.widgets import DetailsPanel, StatCard
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-css_path = os.path.join(current_dir, "style.css")
+qss_path = os.path.join(current_dir, "style.qss")
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
         palette.setColor(QPalette.Highlight, QColor("#2f73d9"))
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         QApplication.instance().setPalette(palette)
-        with open(css_path, "r", encoding="utf-8") as f:
+        with open(qss_path, "r", encoding="utf-8") as f:
             self.setStyleSheet(f.read())
 
     def _set_status(self, text: str):
