@@ -190,14 +190,14 @@ class MainWindow(QMainWindow):
         self.library_label.setObjectName("LibraryPathLabel")
         self.library_label.setWordWrap(True)
 
-        self.excludes_box = QPlainTextEdit()
-        self.excludes_box.setPlaceholderText("One exclude path per line")
-        self.excludes_box.setMinimumHeight(82)
-        self.excludes_box.setMaximumHeight(110)
+        # self.excludes_box = QPlainTextEdit()
+        # self.excludes_box.setPlaceholderText("One exclude path per line")
+        # self.excludes_box.setMinimumHeight(82)
+        # self.excludes_box.setMaximumHeight(110)
 
-        self.save_excludes_btn = QPushButton("Save Excludes")
-        self.save_excludes_btn.clicked.connect(self._save_excludes)
-        self.save_excludes_btn.setObjectName("SecondaryButton")
+        # self.save_excludes_btn = QPushButton("Save Excludes")
+        # self.save_excludes_btn.clicked.connect(self._save_excludes)
+        # self.save_excludes_btn.setObjectName("SecondaryButton")
 
         self.scan_now_btn = QPushButton("Scan Now")
         self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
@@ -213,8 +213,8 @@ class MainWindow(QMainWindow):
         tools_layout.setContentsMargins(10, 10, 10, 10)
         tools_layout.setSpacing(8)
         tools_layout.addWidget(self.library_label)
-        tools_layout.addWidget(self.excludes_box)
-        tools_layout.addWidget(self.save_excludes_btn)
+        # tools_layout.addWidget(self.excludes_box)
+        # tools_layout.addWidget(self.save_excludes_btn)
         tool_buttons = QHBoxLayout()
         tool_buttons.setSpacing(8)
         tool_buttons.addWidget(self.scan_now_btn)
@@ -338,7 +338,7 @@ class MainWindow(QMainWindow):
         self.people_label.setText(self._ui_text("people"))
         self.group_title.setText(self._ui_text("group_title"))
         self.choose_btn.setText(self._ui_text("add"))
-        self.save_excludes_btn.setText(self._ui_text("save_excludes"))
+        # self.save_excludes_btn.setText(self._ui_text("save_excludes"))
         self.scan_now_btn.setText(self._ui_text("scan_now"))
         self.delete_library_btn.setText(self._ui_text("delete"))
         self.search_btn.setText(self._ui_text("search"))
@@ -553,7 +553,7 @@ class MainWindow(QMainWindow):
         busy = self.controller.scan_running or self.controller.analysis_running
         self.scan_now_btn.setEnabled(has_library and not busy)
         self.delete_library_btn.setEnabled(has_library and not busy)
-        self.save_excludes_btn.setEnabled(has_library and not busy)
+        # self.save_excludes_btn.setEnabled(has_library and not busy)
         self.settings_btn.setEnabled(not busy)
 
     def _refresh_exiftool_status(self):
