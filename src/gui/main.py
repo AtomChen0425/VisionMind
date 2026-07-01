@@ -4,7 +4,7 @@ from pathlib import Path
 import logging
 import sys
 import os
-from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect
+from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect,QTimer
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,7 +25,9 @@ from PySide6.QtWidgets import (
     QSplitter,
     QVBoxLayout,
     QWidget,
-    QSizePolicy
+    QSizePolicy,
+    QStyledItemDelegate,
+    QStyle
     
 )
 
@@ -115,7 +117,20 @@ class LibraryRowWidget(QWidget):
         self.name_label.setText(elided)
         # self.name_label.setText(metrics.elidedText(self.name_label.toolTip(), Qt.ElideRight, available))
 
+class GalleryDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        pixmap = index.data(Qt.DecorationRole)
+        if pixmap:
+            painter.drawPixmap(option.rect.x(), option.rect.y(), pixmap)
+            
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, QColor(47, 115, 217, 100))
 
+    def sizeHint(self, option, index):
+        pixmap = index.data(Qt.DecorationRole)
+        if pixmap:
+            return pixmap.size()
+        return QSize(320, 220) 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -152,6 +167,10 @@ class MainWindow(QMainWindow):
         self._search_mode_key = "mixed"
         self._details_panel_width = 380
 
+        self._layout_reflow_timer = QTimer(self)
+        self._layout_reflow_timer.setSingleShot(True)
+        self._layout_reflow_timer.setInterval(100)
+        self._layout_reflow_timer.timeout.connect(self._do_gallery_reflow)
         self._build_ui()
         self._bind_signals()
         self._apply_style()
@@ -324,15 +343,19 @@ class MainWindow(QMainWindow):
         self.view.setViewMode(QListView.IconMode)
         self.view.setResizeMode(QListView.Adjust)
         self.view.setMovement(QListView.Static)
-        self.view.setSpacing(16)
+        self.view.setSpacing(10)
         self.view.setWrapping(True)
-        self.view.setIconSize(QSize(220, 220))
-        self.view.setUniformItemSizes(True)
+        # self.view.setIconSize(QSize(220, 220))
+        self.view.setUniformItemSizes(False)
         self.view.setWordWrap(True)
         self.view.setSelectionMode(QListView.ExtendedSelection)
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_gallery_context_menu)
         self.view.viewport().installEventFilter(self)
+        
+        self.delegate = GalleryDelegate()
+        self.view.setItemDelegate(self.delegate)
+        
         center_layout.addWidget(self.view)
         main_layout.addWidget(center_panel, 1)
 
@@ -439,7 +462,13 @@ class MainWindow(QMainWindow):
         self.search_service = SemanticSearchService(self.db, self.analysis_service, self.vector_index)
         self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter(), self.vector_index)
         self.controller.pipeline = self.pipeline
+    def _on_gallery_data_changed(self, topLeft, bottomRight, roles):
+        if not roles or Qt.DecorationRole in roles:
+            self._layout_reflow_timer.start()  
 
+    def _do_gallery_reflow(self):
+        if hasattr(self, "view") and self.view.model():
+            self.view.doItemsLayout()
     def _open_settings_dialog(self):
         if self.controller.scan_running or self.controller.analysis_running:
             QMessageBox.information(self, self._ui_text("settings_title"), self._ui_text("settings_busy"))
@@ -801,6 +830,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "gallery_model"):
             self.gallery_model.shutdown()
         self.gallery_model = GalleryModel(self.db, library_id)
+        self.gallery_model.dataChanged.connect(self._on_gallery_data_changed)
         self.view.setModel(self.gallery_model)
         self.view.setIconSize(self.gallery_model._placeholder.size())
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
