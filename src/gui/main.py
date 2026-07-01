@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(divider)
 
         group_header = QHBoxLayout()
-        self.group_title = QLabel("分组")
+        self.group_title = QLabel("Libraries")
         self.group_title.setObjectName("SectionLabel")
         self.choose_btn = QPushButton("➕")
         self.choose_btn.clicked.connect(self.choose_library)
