@@ -12,7 +12,7 @@ LANGUAGES = {
 TRANSLATIONS: dict[str, dict[str, Any]] = {
     "en": {
         "title": "AI Gallery",
-        "people": "People",
+        "people": "Photo",
         "group_title": "Libraries",
         "add": "Add",
         "no_library_selected": "No library selected",
@@ -91,7 +91,7 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
     },
     "zh": {
         "title": "AI 相册",
-        "people": "人物",
+        "people": "照片",
         "group_title": "分组",
         "add": "添加",
         "no_library_selected": "未选择相册",
