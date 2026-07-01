@@ -161,7 +161,9 @@ class MainWindow(QMainWindow):
 
         last_library = self.settings.value("lastLibraryPath", "", str)
         if last_library and Path(last_library).exists():
-            self._select_or_add_library(last_library, from_startup=True)
+            existing_library = self.db.get_library(last_library)
+            if existing_library is not None:
+                self._select_library(int(existing_library["id"]))
         elif self.library_list.count() > 0:
             self.library_list.setCurrentRow(0)
             self._select_library_by_row(0)
@@ -863,6 +865,9 @@ class MainWindow(QMainWindow):
             self.logger.info("Deleting library_id=%s root_path=%s", library_id, root_path)
             self.controller.remove_library(library_id)
             self.vector_index.delete_library_indexes(library_id)
+            last_library = self.settings.value("lastLibraryPath", "", str)
+            if last_library and Path(last_library).resolve() == Path(root_path).resolve():
+                self.settings.setValue("lastLibraryPath", "")
         except Exception as exc:
             self.logger.exception("Failed to delete library_id=%s", library_id)
             QMessageBox.critical(self, self._ui_text("delete_library_failed_title"), str(exc))
