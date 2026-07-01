@@ -1,0 +1,32 @@
+# Default Label Set
+
+- person
+- portrait
+- landscape
+- architecture
+- street
+- night
+- indoor
+- outdoor
+- food
+- animal
+- vehicle
+- flower
+- sport
+- travel
+- mountain
+- beach
+- forest
+- city
+- document
+- product
+- flight
+- train
+- boat
+- car
+- bus
+- building
+- sky
+- tree
+- lake
+- sea

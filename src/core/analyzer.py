@@ -1,46 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Iterable, Sequence
+import hashlib
+from typing import Sequence
 
 import logging
 import numpy as np
 
 from .image_processing import load_image_for_processing
+from .label_feature_cache import LabelFeatureCache
+from .label_manifest import load_label_manifest
 from .model_cache import configure_model_cache
 
 
-DEFAULT_LABELS = (
-    "person",
-    "portrait",
-    "landscape",
-    "architecture",
-    "street",
-    "night",
-    "indoor",
-    "outdoor",
-    "food",
-    "animal",
-    "vehicle",
-    "flower",
-    "sport",
-    "travel",
-    "mountain",
-    "beach",
-    "forest",
-    "city",
-    "document",
-    "product",
-    "flight",
-    "train",
-    "boat",
-    "car",
-    "bus",
-    "building"
-)
-
-PROMPT_TEMPLATE = "a photo of a {}"
+PROMPT_TEMPLATE = "a photo of {}"
 PROTABILITY_THRESHOLD = 0.2
 logger = logging.getLogger(__name__)
 @dataclass(slots=True)
@@ -70,6 +43,7 @@ class OpenClipAnalyzer:
         self.probability_threshold = float(probability_threshold)
         self._device_name = device
         self.model_cache_root = configure_model_cache()
+        self._label_feature_cache = LabelFeatureCache(self.model_cache_root / "label_cache")
         self._model = None
         self._preprocess = None
         self._tokenizer = None
@@ -142,8 +116,21 @@ class OpenClipAnalyzer:
 
     def infer_batch(self, image_paths: Sequence[str], labels: Sequence[str] | None = None, top_k: int = 8) -> list[AnalysisResult]:
         self._ensure_model()
-        raw_labels = tuple(labels or DEFAULT_LABELS)
-        labels = self.apply_prompt_template(raw_labels)
+        if labels is None:
+            raw_labels, labels_signature, _ = load_label_manifest()
+        else:
+            raw_labels = [str(label) for label in labels]
+            labels_signature = "custom:" + hashlib.sha256("\n".join(raw_labels).encode("utf-8")).hexdigest()
+        label_features = self._label_feature_cache.get_or_build(
+            model_id=self.model_id(),
+            labels=raw_labels,
+            prompt_template=PROMPT_TEMPLATE,
+            labels_signature=labels_signature,
+            tokenizer=self._tokenizer,
+            model=self._model,
+            device=self._device,
+            torch_module=self._torch,
+        )
         image_paths = [str(path) for path in image_paths]
         if not image_paths:
             return []
@@ -154,15 +141,13 @@ class OpenClipAnalyzer:
             image = load_image_for_processing(image_path)
             image_tensors.append(self._preprocess(image.convert("RGB")))
         image_tensor = self._torch.stack(image_tensors, dim=0).to(self._device)
-        label_tokens = self._tokenizer(list(labels)).to(self._device)
 
         with self._torch.no_grad():
             image_features = self._model.encode_image(image_tensor)
-            text_features = self._model.encode_text(label_tokens)
 
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-            logits = (100.0 * image_features @ text_features.T).softmax(dim=-1)
+            label_features = self._torch.as_tensor(label_features, device=self._device, dtype=image_features.dtype)
+            logits = (100.0 * image_features @ label_features.T).softmax(dim=-1)
             probabilities = logits.detach().cpu().numpy()
             embeddings = image_features.detach().cpu().numpy().astype(np.float32)
 
