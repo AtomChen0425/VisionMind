@@ -582,7 +582,7 @@ class MainWindow(QMainWindow):
             return
         self.gallery_model.refresh(self.library_id)
         self.view.setModel(self.gallery_model)
-        self._sync_library_excludes_box()
+        # self._sync_library_excludes_box()
         self._refresh_stats()
         self._update_library_action_state()
 
