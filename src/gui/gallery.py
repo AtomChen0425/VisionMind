@@ -309,6 +309,7 @@ class GalleryModel(QAbstractListModel):
             target_height, 
             Qt.SmoothTransformation
         )
+        #-----------------------------------
         # target_size = QSize(320, 320)
         # if original_pixmap.size() != target_size:
         #     pixmap = QPixmap(target_size)
