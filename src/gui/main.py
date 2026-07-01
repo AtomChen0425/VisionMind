@@ -5,7 +5,7 @@ import logging
 import sys
 import os
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect
-from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap,QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -827,6 +827,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication([])
+    app.setWindowIcon(QIcon(r'docs\icon_256x256.ico'))
     window = MainWindow()
     window.show()
     app.exec()
