@@ -98,17 +98,18 @@ class GalleryModel(QAbstractListModel):
         self._thumb_thread.wait(2000)
 
     def _build_placeholder(self) -> QPixmap:
-        pixmap = QPixmap(320, 320)
-        pixmap.fill(QColor("#e8dfd2"))
-        painter = QPainter(pixmap)
-        gradient = QLinearGradient(0, 0, 320, 320)
-        gradient.setColorAt(0.0, QColor("#f4eadb"))
-        gradient.setColorAt(1.0, QColor("#cfe2d9"))
-        painter.fillRect(0, 0, 320, 320, QBrush(gradient))
-        painter.setPen(QColor("#716658"))
-        painter.setFont(QFont("Segoe UI", 10))
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "Loading")
-        painter.end()
+        # pixmap = QPixmap(320, 320)
+        pixmap = QPixmap(290, 220)
+        pixmap.fill(QColor(47, 115, 217, 100))
+        # painter = QPainter(pixmap)
+        # gradient = QLinearGradient(0, 0, 290, 220)
+        # gradient.setColorAt(0.0, QColor("#f4eadb"))
+        # gradient.setColorAt(1.0, QColor("#cfe2d9"))
+        # painter.fillRect(0, 0, 320, 320, QBrush(gradient))
+        # painter.setPen(QColor("#716658"))
+        # painter.setFont(QFont("Segoe UI", 10))
+        # painter.drawText(pixmap.rect(), Qt.AlignCenter, "Loading")
+        # painter.end()
         return pixmap
 
     def _decorated_thumbnail(self, item: GalleryItem) -> QPixmap:
@@ -179,7 +180,7 @@ class GalleryModel(QAbstractListModel):
         self._total_count = self.db.count_library_files(library_id)
         self._items = []
         self._thumb_requests.clear()
-        self._thumb_cache.clear()
+        # self._thumb_cache.clear()
         self.endResetModel()
         self.fetchMore(QModelIndex())
 
@@ -189,7 +190,7 @@ class GalleryModel(QAbstractListModel):
         self._total_count = len(rows)
         self._items = []
         self._thumb_requests.clear()
-        self._thumb_cache.clear()
+        # self._thumb_cache.clear()
         score_map = score_map or {}
         for row in rows:
             file_id = int(row["id"])
@@ -206,7 +207,7 @@ class GalleryModel(QAbstractListModel):
                     last_error=row["last_error"],
                     xmp_state=str(row["xmp_state"] or "not_written"),
                     deleted_at=row["deleted_at"],
-                    thumbnail=None,
+                    thumbnail=self._thumb_cache.get(file_id),
                 )
             )
         self.endResetModel()
@@ -302,7 +303,33 @@ class GalleryModel(QAbstractListModel):
 
     @Slot(int, QImage)
     def _on_thumbnail_ready(self, file_id: int, image: QImage):
-        pixmap = QPixmap.fromImage(image)
+        original_pixmap = QPixmap.fromImage(image)
+        target_height = 220
+        pixmap = original_pixmap.scaledToHeight(
+            target_height, 
+            Qt.SmoothTransformation
+        )
+        #-----------------------------------
+        # target_size = QSize(320, 320)
+        # if original_pixmap.size() != target_size:
+        #     pixmap = QPixmap(target_size)
+        #     pixmap.fill(Qt.transparent)
+            
+        #     scaled_pixmap = original_pixmap.scaled(
+        #         target_size, 
+        #         Qt.KeepAspectRatio, 
+        #         Qt.SmoothTransformation
+        #     )
+        #     painter = QPainter(pixmap)
+        #     painter.setRenderHint(QPainter.Antialiasing, True)
+        #     x = (target_size.width() - scaled_pixmap.width()) // 2
+        #     y = (target_size.height() - scaled_pixmap.height()) // 2
+        #     painter.drawPixmap(x, y, scaled_pixmap)
+        #     painter.end()
+        # else:
+        #     pixmap = original_pixmap
+        # # ------------------------------------
+
         self._thumb_cache[file_id] = pixmap
         self._thumb_cache.move_to_end(file_id)
         if len(self._thumb_cache) > self.MAX_CACHE_SIZE:

@@ -547,6 +547,30 @@ class DatabaseManager:
     def set_xmp_state(self, file_id: int, state: str):
         self.set_metadata_state(file_id, state)
 
+    def sync_file_metadata(
+        self,
+        file_id: int,
+        *,
+        mtime: float,
+        mtime_ns: int,
+        size: int,
+        file_hash: str | None = None,
+    ):
+        stored_hash = file_hash or f"meta:{mtime_ns}:{size}"
+        with self.get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE files
+                SET file_hash = ?,
+                    mtime = ?,
+                    mtime_ns = ?,
+                    size = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (stored_hash, mtime, mtime_ns, size, file_id),
+            )
+
     def replace_tags(
         self,
         file_id: int,

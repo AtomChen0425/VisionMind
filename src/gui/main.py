@@ -1,15 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
-import json
 import logging
 import sys
-
-from PySide6.QtCore import QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap
+import os
+from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect,QTimer
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -20,147 +20,117 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
-    QSizePolicy,
-    QSplitter,
     QMenu,
-    QTextEdit,
+    QSplitter,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
+    QStyledItemDelegate,
+    QStyle
+    
 )
 
 from src.core.analyzer import AnalysisService, OpenClipAnalyzer
 from src.core.database import DatabaseManager
 from src.core.logging_utils import setup_logging
-from src.core.metadata_reader import read_image_metadata
+from src.core.metadata_reader import read_image_metadata,extract_keywords
 from src.core.semantic_search import SemanticSearchService
 from src.core.pipeline import PhotoProcessingPipeline
 from src.core.exiftool_metadata import ExifToolTagWriter
 from src.core.scanner import Scanner
 from src.core.vector_index import VectorIndexManager
 from src.gui.automation import AutoLibraryController
+from src.gui.i18n import normalize_language, tr
 from src.gui.gallery import GalleryModel
+from src.gui.settings_dialog import AppSettings, SettingsDialog
 
 
-class StatCard(QFrame):
-    def __init__(self, title: str, value: str = "0"):
-        super().__init__()
-        self.setObjectName("StatCard")
-        self.title = QLabel(title)
-        self.title.setObjectName("StatTitle")
-        self.value = QLabel(value)
-        self.value.setObjectName("StatValue")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(4)
-        layout.addWidget(self.title)
-        layout.addWidget(self.value)
+from src.gui.widgets import DetailsPanel, StatCard
 
-    def set_value(self, value: str):
-        self.value.setText(value)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+qss_path = os.path.join(current_dir, "style.qss")
 
 
-class AspectPreviewLabel(QLabel):
-    def __init__(self):
-        super().__init__("Select a photo")
-        self.setAlignment(Qt.AlignCenter)
-        self.setMinimumHeight(320)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._source_pixmap: QPixmap | None = None
+class LibraryRowWidget(QWidget):
+    def __init__(self, display_name: str, root_path: str, delete_callback, parent=None):
+        super().__init__(parent)
+        self._delete_callback = delete_callback
+        self._root_path = root_path
+        self._full_display_name = display_name
+        self.setObjectName("LibraryRowWidget")
 
-    def set_source_pixmap(self, pixmap: QPixmap | None):
-        self._source_pixmap = pixmap
-        self._refresh_pixmap()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 10, 0)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignVCenter)
+        self.accent_bar = QFrame()
+        self.accent_bar.setObjectName("LibraryRowAccent")
+        self.accent_bar.setFixedWidth(4)
+        self.accent_bar.hide()
+
+        self.name_label = QLabel(self._full_display_name)
+        self.name_label.setObjectName("LibraryRowName")
+        self.name_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        self.delete_btn = QPushButton("🗑")
+        self.delete_btn.setObjectName("LibraryDeleteButton")
+        self.delete_btn.clicked.connect(self._on_delete_clicked)
+        self.delete_btn.hide()
+
+        layout.addWidget(self.accent_bar, 0, Qt.AlignVCenter)
+        layout.addWidget(self.name_label, 1,Qt.AlignVCenter)
+        layout.addWidget(self.delete_btn, 0,Qt.AlignVCenter)
+        self.setMinimumHeight(40)
+        self._update_elided_text()
+
+    def _on_delete_clicked(self):
+        if callable(self._delete_callback):
+            self._delete_callback()
+
+    def set_delete_tooltip(self, text: str):
+        self.delete_btn.setToolTip(text)
+
+    def set_selected(self, selected: bool):
+        self.setProperty("selected", selected)
+        self.accent_bar.setVisible(selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def enterEvent(self, event):
+        self.delete_btn.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.delete_btn.hide()
+        super().leaveEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._refresh_pixmap()
+        self._update_elided_text()
 
-    def _refresh_pixmap(self):
-        if self._source_pixmap is None or self._source_pixmap.isNull():
-            self.setPixmap(QPixmap())
-            return
-        scaled = self._source_pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.setPixmap(scaled)
+    def _update_elided_text(self):
+        metrics = self.name_label.fontMetrics()
+        available = max(80, self.name_label.width() or self.width() - 78)
+        elided = metrics.elidedText(self._full_display_name, Qt.ElideRight, available)
+        self.name_label.setText(elided)
+        # self.name_label.setText(metrics.elidedText(self.name_label.toolTip(), Qt.ElideRight, available))
 
+class GalleryDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        pixmap = index.data(Qt.DecorationRole)
+        if pixmap:
+            painter.drawPixmap(option.rect.x(), option.rect.y(), pixmap)
+            
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, QColor(47, 115, 217, 100))
 
-class DetailsPanel(QFrame):
-    def __init__(self):
-        super().__init__()
-        self.setObjectName("DetailsPanel")
-        self.preview = AspectPreviewLabel()
-
-        self.path = QLabel("-")
-        self.relative_path = QLabel("-")
-        self.status = QLabel("-")
-        self.metadata_state = QLabel("-")
-        self.tags = QTextEdit()
-        self.tags.setReadOnly(True)
-        self.tags.setMinimumHeight(180)
-        self.metadata_details = QTextEdit()
-        self.metadata_details.setReadOnly(True)
-        self.metadata_details.setMinimumHeight(220)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-        layout.addWidget(self.preview)
-        layout.addWidget(self._label_block("File", self.path))
-        layout.addWidget(self._label_block("Relative", self.relative_path))
-        layout.addWidget(self._label_block("Status", self.status))
-        layout.addWidget(self._label_block("Metadata", self.metadata_state))
-        layout.addWidget(self._label_block("Tags", self.tags))
-        layout.addWidget(self._label_block("Image Metadata", self.metadata_details))
-
-    def _label_block(self, title: str, widget: QWidget):
-        container = QFrame()
-        container.setObjectName("DetailBlock")
-        block_layout = QVBoxLayout(container)
-        block_layout.setContentsMargins(0, 0, 0, 0)
-        block_layout.setSpacing(4)
-        heading = QLabel(title)
-        heading.setObjectName("DetailHeading")
-        block_layout.addWidget(heading)
-        block_layout.addWidget(widget)
-        return container
-
-    def set_item(self, item, tags):
-        if item is None:
-            self.preview.setText("Select a photo")
-            self.preview.set_source_pixmap(None)
-            self.path.setText("-")
-            self.relative_path.setText("-")
-            self.status.setText("-")
-            self.metadata_state.setText("-")
-            self.tags.setPlainText("")
-            self.metadata_details.setPlainText("")
-            return
-
-        pixmap = item.thumbnail or QPixmap(320, 320)
-        if item.thumbnail is None:
-            pixmap.fill(QColor("#f3f0e8"))
-        self.preview.setText("")
-        self.preview.set_source_pixmap(pixmap)
-        self.path.setText(item.file_path)
-        self.relative_path.setText(item.relative_path)
-        if item.status == "error" and item.last_error:
-            self.status.setText(f"error: {item.last_error}")
-        else:
-            self.status.setText(item.status)
-        self.metadata_state.setText(item.xmp_state)
-        if tags:
-            text = "\n".join(f"{row['tag_name']}  ({row['confidence']:.2f})" for row in tags)
-        else:
-            text = "No tags yet"
-        self.tags.setPlainText(text)
-        try:
-            metadata = read_image_metadata(item.file_path)
-            self.metadata_details.setPlainText(json.dumps(metadata, indent=2, ensure_ascii=False, default=str))
-        except Exception as exc:
-            self.metadata_details.setPlainText(f"Failed to read metadata: {exc}")
-
-
+    def sizeHint(self, option, index):
+        pixmap = index.data(Qt.DecorationRole)
+        if pixmap:
+            return pixmap.size()
+        return QSize(320, 220) 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -172,7 +142,18 @@ class MainWindow(QMainWindow):
         self.logger.info("Application starting")
         self.db = DatabaseManager("data/photo_manager.db")
         self.scanner = Scanner(self.db)
-        self.analyzer = OpenClipAnalyzer()
+
+        self.settings = QSettings("PhotoManager", "PhotoManager")
+        self.ui_language = normalize_language(self.settings.value("ui/language", "en", str))
+        self.analyzer_model_name = self.settings.value("analyzer/model_name", "ViT-B-32", str)
+        self.analyzer_pretrained = self.settings.value("analyzer/pretrained", "laion2b_s34b_b79k", str)
+        self.analyzer_probability_threshold = float(self.settings.value("analyzer/probability_threshold", 0.2))
+
+        self.analyzer = OpenClipAnalyzer(
+            model_name=self.analyzer_model_name,
+            pretrained=self.analyzer_pretrained,
+            probability_threshold=self.analyzer_probability_threshold,
+        )
         self.logger.info("open_clip cache root=%s", self.analyzer.model_cache_root)
         self.analysis_service = AnalysisService(self.analyzer)
         self.vector_index = VectorIndexManager(self.db)
@@ -180,192 +161,230 @@ class MainWindow(QMainWindow):
         self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter(), self.vector_index)
         self.controller = AutoLibraryController(self.db, self.scanner, self.pipeline)
 
-        self.settings = QSettings("PhotoManager", "PhotoManager")
         self.library_id: int | None = None
         self.root_path: str = ""
         self._updating_library_list = False
-        self._search_mode = "Mixed"
+        self._search_mode_key = "mixed"
+        self._details_panel_width = 380
 
+        self._layout_reflow_timer = QTimer(self)
+        self._layout_reflow_timer.setSingleShot(True)
+        self._layout_reflow_timer.setInterval(100)
+        self._layout_reflow_timer.timeout.connect(self._do_gallery_reflow)
         self._build_ui()
         self._bind_signals()
         self._apply_style()
+        self._apply_language()
         self._refresh_exiftool_status()
         self.controller.refresh_libraries()
 
         last_library = self.settings.value("lastLibraryPath", "", str)
         if last_library and Path(last_library).exists():
-            self._select_or_add_library(last_library, from_startup=True)
+            existing_library = self.db.get_library(last_library)
+            if existing_library is not None:
+                self._select_library(int(existing_library["id"]))
         elif self.library_list.count() > 0:
             self.library_list.setCurrentRow(0)
             self._select_library_by_row(0)
         else:
-            self.status_label.setText("Choose a library to start automatic import monitoring")
+            self.status_label.setText(self._ui_text("choose_library_prompt"))
 
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        outer = QVBoxLayout(central)
-        outer.setContentsMargins(18, 18, 18, 18)
-        outer.setSpacing(14)
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         self.search_mode = QComboBox()
-        self.search_mode.addItems(["Mixed", "Filename", "Semantic"])
+        self._populate_search_mode_combo()
         self.search_mode.currentTextChanged.connect(self._on_search_mode_changed)
 
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search by filename or meaning")
+        self.search_box.setPlaceholderText('Search photos, e.g. "sunset by the sea" or "group portrait"')
         self.search_box.returnPressed.connect(self._execute_search)
         self.search_btn = QPushButton("Search")
         self.search_btn.clicked.connect(self._execute_search)
-        self.search_btn.setObjectName("SecondaryButton")
+        self.search_btn.setObjectName("PrimaryButton")
 
-        header = QFrame()
-        header.setObjectName("HeaderCard")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(18, 16, 18, 16)
-        header_layout.setSpacing(14)
+        left_panel = QFrame()
+        left_panel.setObjectName("Sidebar")
+        left_panel.setFixedWidth(280)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(16, 14, 16, 16)
+        left_layout.setSpacing(12)
 
-        title_block = QVBoxLayout()
-        self.title_label = QLabel("PhotoManager")
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(10)
+        self.title_label = QLabel("AI Gallery")
         self.title_label.setObjectName("AppTitle")
-        self.subtitle_label = QLabel("Automatic library ingestion, thumbnails, ExifTool metadata tags, and AI keywording")
-        self.subtitle_label.setObjectName("AppSubtitle")
-        title_block.addWidget(self.title_label)
-        title_block.addWidget(self.subtitle_label)
-        header_layout.addLayout(title_block, 1)
+        self.settings_btn = QPushButton("⚙")
+        self.settings_btn.setObjectName("IconButton")
+        self.settings_btn.clicked.connect(self._open_settings_dialog)
+        self.settings_btn.setEnabled(True)
+        brand_row.addWidget(self.title_label, 3)
+        brand_row.addWidget(self.settings_btn)
+        left_layout.addLayout(brand_row)
 
-        search_panel = QFrame()
-        search_panel.setObjectName("SearchPanel")
-        search_layout = QHBoxLayout(search_panel)
-        search_layout.setContentsMargins(10, 8, 10, 8)
-        search_layout.setSpacing(8)
-        search_layout.addWidget(self.search_box, 1)
-        search_layout.addWidget(self.search_mode)
-        search_layout.addWidget(self.search_btn)
-        header_layout.addWidget(search_panel, 2)
+        self.people_row = QFrame()
+        self.people_row.setObjectName("NavRow")
+        people_layout = QHBoxLayout(self.people_row)
+        people_layout.setContentsMargins(10, 8, 10, 8)
+        self.people_label = QLabel("People")
+        self.people_count = QLabel("0")
+        self.people_count.setObjectName("MutedCount")
+        people_layout.addWidget(self.people_label, 1)
+        people_layout.addWidget(self.people_count)
+        left_layout.addWidget(self.people_row)
 
-        action_block = QHBoxLayout()
-        self.choose_btn = QPushButton("Add Library")
+        divider = QFrame()
+        divider.setObjectName("SidebarDivider")
+        divider.setFixedHeight(1)
+        left_layout.addWidget(divider)
+
+        group_header = QHBoxLayout()
+        self.group_title = QLabel("Libraries")
+        self.group_title.setObjectName("SectionLabel")
+        self.choose_btn = QPushButton("➕")
         self.choose_btn.clicked.connect(self.choose_library)
-        self.monitoring_tag = QLabel("Auto monitoring")
-        self.monitoring_tag.setObjectName("MonitoringTag")
-        action_block.addWidget(self.choose_btn)
-        action_block.addWidget(self.monitoring_tag)
+        self.choose_btn.setObjectName("SmallIconButton")
+        group_header.addWidget(self.group_title, 1)
+        group_header.addWidget(self.choose_btn)
+        left_layout.addLayout(group_header)
 
-        exiftool_block = QVBoxLayout()
-        exiftool_block.setSpacing(4)
+        self.library_list = QListWidget()
+        self.library_list.setObjectName("LibraryList")
+        self.library_list.currentRowChanged.connect(self._select_library_by_row)
+        left_layout.addWidget(self.library_list, 1)
+
+        left_layout.addStretch(1)
+
+        sidebar_footer = QFrame()
+        sidebar_footer.setObjectName("SidebarFooter")
+        footer_layout = QVBoxLayout(sidebar_footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(8)
+
+        self.status_label = QLabel("Idle")
+        self.status_label.setObjectName("StatusLabel")
+        self.status_label.setWordWrap(True)
         self.exiftool_status_label = QLabel("ExifTool: checking...")
         self.exiftool_status_label.setObjectName("ExifToolStatusTag")
         self.exiftool_status_label.setWordWrap(True)
         self.exiftool_path_label = QLabel("-")
         self.exiftool_path_label.setObjectName("ExifToolPathTag")
         self.exiftool_path_label.setWordWrap(True)
-        exiftool_block.addWidget(self.exiftool_status_label)
-        exiftool_block.addWidget(self.exiftool_path_label)
-        action_block.addLayout(exiftool_block)
-        header_layout.addLayout(action_block, 1)
+        footer_layout.addWidget(self.status_label)
+        footer_layout.addWidget(self.exiftool_status_label)
+        footer_layout.addWidget(self.exiftool_path_label)
+        left_layout.addWidget(sidebar_footer)
 
-        outer.addWidget(header)
+        self.library_label = QLabel("No library selected")
+        self.library_label.setObjectName("LibraryPathLabel")
+        self.library_label.setWordWrap(True)
+        self.library_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        stats_row = QHBoxLayout()
-        stats_row.setSpacing(12)
+        self.scan_now_btn = QPushButton("Scan Now")
+        self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
+        self.scan_now_btn.setObjectName("HeaderActionButton")
+
+        main_panel = QFrame()
+        main_panel.setObjectName("MainPanel")
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(26, 6, 22, 22)
+        main_layout.setSpacing(16)
+
+        top_bar = QFrame()
+        top_bar.setObjectName("TopBar")
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(10)
+        top_layout.addWidget(self.search_box, 1)
+        top_layout.addWidget(self.search_mode)
+        top_layout.addWidget(self.search_btn)
+        main_layout.addWidget(top_bar)
+
+        content_header = QHBoxLayout()
+        title_column = QVBoxLayout()
+        title_column.setSpacing(4)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(0)
+        self.album_title = QLabel("Default Album")
+        self.album_title.setObjectName("AlbumTitle")
+        self.album_subtitle = QLabel("0 photos")
+        self.album_subtitle.setObjectName("AlbumSubtitle")
+        title_row.addWidget(self.album_title, 0)
+        title_row.addWidget(self.library_label, 1)
+        title_column.addLayout(title_row)
+        title_column.addWidget(self.album_subtitle)
+        action_row.addWidget(self.scan_now_btn, 0)
+        action_row.addStretch(1)
+        title_column.addLayout(action_row)
+        content_header.addLayout(title_column, 1)
+
         self.total_card = StatCard("Total")
         self.pending_card = StatCard("Pending")
         self.analyzed_card = StatCard("Analyzed")
         self.error_card = StatCard("Errors")
         for card in (self.total_card, self.pending_card, self.analyzed_card, self.error_card):
-            stats_row.addWidget(card)
-        outer.addLayout(stats_row)
-
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-
-        left_panel = QFrame()
-        left_panel.setObjectName("SidePanel")
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(16, 16, 16, 16)
-        left_layout.setSpacing(12)
-
-        self.library_list = QListWidget()
-        self.library_list.currentRowChanged.connect(self._select_library_by_row)
-
-        self.library_label = QLabel("No library selected")
-        self.library_label.setWordWrap(True)
-        self.status_label = QLabel("Idle")
-        self.status_label.setWordWrap(True)
-
-        self.excludes_box = QPlainTextEdit()
-        self.excludes_box.setPlaceholderText("One exclude path per line")
-        self.excludes_box.setMinimumHeight(120)
-
-        self.save_excludes_btn = QPushButton("Save Excludes")
-        self.save_excludes_btn.clicked.connect(self._save_excludes)
-        self.save_excludes_btn.setObjectName("SecondaryButton")
-
-        self.scan_now_btn = QPushButton("Scan Now")
-        self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
-        self.scan_now_btn.setObjectName("SecondaryButton")
-
-        self.delete_library_btn = QPushButton("Delete Library")
-        self.delete_library_btn.clicked.connect(self._delete_current_library)
-        self.delete_library_btn.setObjectName("SecondaryButton")
-
-        left_layout.addWidget(QLabel("Libraries"))
-        left_layout.addWidget(self.library_list, 1)
-        left_layout.addWidget(QLabel("Current Library"))
-        left_layout.addWidget(self.library_label)
-        left_layout.addWidget(QLabel("Status"))
-        left_layout.addWidget(self.status_label)
-        left_layout.addWidget(QLabel("Exclude Paths"))
-        left_layout.addWidget(self.excludes_box)
-        left_layout.addWidget(self.save_excludes_btn)
-        action_row = QHBoxLayout()
-        action_row.addWidget(self.scan_now_btn)
-        action_row.addWidget(self.delete_library_btn)
-        left_layout.addLayout(action_row)
+            content_header.addWidget(card)
+        main_layout.addLayout(content_header)
 
         center_panel = QFrame()
         center_panel.setObjectName("CenterPanel")
         center_layout = QVBoxLayout(center_panel)
-        center_layout.setContentsMargins(16, 16, 16, 16)
-        center_layout.setSpacing(12)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
 
         self.view = QListView()
         self.view.setViewMode(QListView.IconMode)
         self.view.setResizeMode(QListView.Adjust)
         self.view.setMovement(QListView.Static)
-        self.view.setSpacing(14)
+        self.view.setSpacing(10)
         self.view.setWrapping(True)
-        self.view.setIconSize(QSize(220, 220))
-        self.view.setUniformItemSizes(True)
+        # self.view.setIconSize(QSize(220, 220))
+        self.view.setUniformItemSizes(False)
         self.view.setWordWrap(True)
-        self.view.setSelectionMode(QListView.SingleSelection)
+        self.view.setSelectionMode(QListView.ExtendedSelection)
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_gallery_context_menu)
+        self.view.viewport().installEventFilter(self)
+        
+        self.delegate = GalleryDelegate()
+        self.view.setItemDelegate(self.delegate)
+        
         center_layout.addWidget(self.view)
+        main_layout.addWidget(center_panel, 1)
 
         right_panel = DetailsPanel()
-        right_panel.setMinimumWidth(380)
-        right_panel.setMaximumWidth(460)
-
-        splitter.addWidget(left_panel)
-        splitter.addWidget(center_panel)
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
-
-        outer.addWidget(splitter, 1)
-
+        right_panel.setMinimumWidth(320)
+        right_panel.setMaximumWidth(720)
+        right_panel.hide()
         self.details_panel = right_panel
+
+        self.content_splitter = QSplitter(Qt.Horizontal)
+        self.content_splitter.setChildrenCollapsible(False)
+        self.content_splitter.setHandleWidth(8)
+        self.content_splitter.setOpaqueResize(True)
+        self.content_splitter.addWidget(main_panel)
+        self.content_splitter.addWidget(right_panel)
+        self.content_splitter.setStretchFactor(0, 1)
+        self.content_splitter.setStretchFactor(1, 0)
+        self.content_splitter.setSizes([1, 0])
+
+        root.addWidget(left_panel)
+        root.addWidget(self.content_splitter, 1)
 
     def _bind_signals(self):
         self.controller.libraries_changed.connect(self._on_libraries_changed)
         self.controller.active_library_changed.connect(self._on_active_library_changed)
-        self.controller.scan_started.connect(lambda library_id, root_path: self._set_status(f"Scanning {root_path} in the background..."))
+        self.controller.scan_started.connect(lambda library_id, root_path: self._set_status(self._ui_text("scanning").format(root_path=root_path)))
         self.controller.scan_started.connect(lambda *_: self._update_library_action_state())
         self.controller.scan_finished.connect(self._on_scan_finished)
-        self.controller.analysis_started.connect(lambda library_id, root_path: self._set_status(f"Analyzing new and changed photos in {root_path}..."))
+        self.controller.analysis_started.connect(lambda library_id, root_path: self._set_status(self._ui_text("analyzing").format(root_path=root_path)))
         self.controller.analysis_started.connect(lambda *_: self._update_library_action_state())
         self.controller.analysis_finished.connect(self._on_analysis_finished)
         self.controller.message.connect(self._set_status)
@@ -373,179 +392,161 @@ class MainWindow(QMainWindow):
     def _apply_style(self):
         QApplication.setStyle("Fusion")
         palette = QPalette()
-        palette.setColor(QPalette.Window, QColor("#ede7dc"))
-        palette.setColor(QPalette.WindowText, QColor("#2d2924"))
-        palette.setColor(QPalette.Base, QColor("#f6f1e8"))
-        palette.setColor(QPalette.AlternateBase, QColor("#e3dccf"))
-        palette.setColor(QPalette.Text, QColor("#2d2924"))
-        palette.setColor(QPalette.Button, QColor("#efe5d2"))
-        palette.setColor(QPalette.ButtonText, QColor("#2d2924"))
-        palette.setColor(QPalette.Highlight, QColor("#357e72"))
+        palette.setColor(QPalette.Window, QColor("#f4f7fb"))
+        palette.setColor(QPalette.WindowText, QColor("#172033"))
+        palette.setColor(QPalette.Base, QColor("#ffffff"))
+        palette.setColor(QPalette.AlternateBase, QColor("#eef3fa"))
+        palette.setColor(QPalette.Text, QColor("#172033"))
+        palette.setColor(QPalette.Button, QColor("#edf3fb"))
+        palette.setColor(QPalette.ButtonText, QColor("#172033"))
+        palette.setColor(QPalette.Highlight, QColor("#2f73d9"))
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         QApplication.instance().setPalette(palette)
-
-        self.setStyleSheet(
-            """
-            QWidget {
-                color: #2d2924;
-                font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
-                font-size: 12px;
-            }
-            QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #e8dfd2, stop:0.52 #f1eadf, stop:1 #dbe7df);
-            }
-            QFrame#HeaderCard, QFrame#SidePanel, QFrame#CenterPanel, QFrame#DetailsPanel, QFrame#StatCard {
-                background: #f4eee3;
-                border: 1px solid #cfc5b6;
-                border-radius: 10px;
-            }
-            QFrame#HeaderCard {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #efe4d4, stop:0.45 #f8f1e6, stop:1 #d9e5dd);
-                border: 1px solid #c8baa6;
-            }
-            QFrame#SearchPanel,
-            QFrame#CenterPanel {
-                background: #ebe3d7;
-                border: 1px solid #cbbfad;
-            }
-            QFrame#SidePanel {
-                background: #e5ddd0;
-            }
-            QFrame#DetailsPanel {
-                background: #eee7db;
-            }
-            QFrame#StatCard {
-                background: #e9e0d2;
-            }
-            QFrame#DetailBlock {
-                background: #e9e1d5;
-                border: 1px solid #d1c6b8;
-                border-radius: 8px;
-                padding: 8px;
-            }
-            QLabel#AppTitle {
-                font-size: 26px;
-                font-weight: 750;
-                color: #29231d;
-            }
-            QLabel#AppSubtitle {
-                color: #6f6558;
-                font-size: 12px;
-            }
-            QLabel#MonitoringTag {
-                color: #214f49;
-                background: #d6e8df;
-                border: 1px solid #a9cbbd;
-                border-radius: 12px;
-                padding: 8px 14px;
-                font-size: 11px;
-                font-weight: 700;
-            }
-            QLabel#ExifToolStatusTag {
-                color: #59401a;
-                background: #ead8b7;
-                border: 1px solid #c9ac72;
-                border-radius: 12px;
-                padding: 8px 14px;
-                font-size: 11px;
-                font-weight: 700;
-            }
-            QLabel#ExifToolPathTag {
-                color: #6f6558;
-                font-size: 11px;
-                font-family: Consolas, monospace;
-                opacity: 0.95;
-            }
-            QLabel#StatTitle, QLabel#DetailHeading {
-                color: #716658;
-                font-size: 11px;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-            }
-            QLabel#StatValue {
-                color: #2b251f;
-                font-size: 28px;
-                font-weight: 700;
-            }
-            QPushButton {
-                background: #357e72;
-                color: #ffffff;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-weight: 600;
-            }
-            QPushButton:hover { background: #2b6c62; }
-            QPushButton:pressed { background: #23584f; }
-            QPushButton:disabled { background: #cfc5b6; color: #8b8175; }
-            QPushButton#SecondaryButton {
-                background: #e7d8bc;
-                color: #342d25;
-                border: 1px solid #c5af82;
-            }
-            QPushButton#SecondaryButton:hover { background: #dec999; }
-            QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {
-                background: #f7f1e7;
-                color: #2d2924;
-                border: 1px solid #c8bbab;
-                border-radius: 8px;
-                padding: 10px 12px;
-                selection-background-color: #357e72;
-                selection-color: #ffffff;
-            }
-            QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
-                border: 1px solid #357e72;
-                background: #fbf5ea;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 28px;
-            }
-            QListView, QListWidget {
-                background: transparent;
-                border: none;
-                outline: 0;
-            }
-            QListView::item, QListWidget::item {
-                background: #f2eadf;
-                border: 1px solid #d5c8b8;
-                border-radius: 8px;
-                padding: 8px;
-                margin: 4px;
-                color: #302a24;
-            }
-            QListView::item:hover, QListWidget::item:hover {
-                background: #eadcc7;
-                border: 1px solid #bd9f66;
-            }
-            QListView::item:selected, QListWidget::item:selected {
-                border: 1px solid #357e72;
-                background: #cfe2d9;
-                color: #1f4640;
-            }
-            QMenu {
-                background: #f4eee3;
-                color: #2d2924;
-                border: 1px solid #c8bbab;
-                border-radius: 8px;
-                padding: 6px;
-            }
-            QMenu::item {
-                padding: 8px 24px;
-                border-radius: 6px;
-            }
-            QMenu::item:selected {
-                background: #cfe2d9;
-                color: #1f4640;
-            }
-            QSplitter::handle {
-                background: #cbc0b1;
-            }
-            """
-        )
+        with open(qss_path, "r", encoding="utf-8") as f:
+            self.setStyleSheet(f.read())
 
     def _set_status(self, text: str):
         self.status_label.setText(text)
+
+    def _ui_text(self, key: str) -> str:
+        return tr(self.ui_language, key)
+
+    def _apply_language(self):
+        current_search_mode = self._search_mode_key
+        self.setWindowTitle(self._ui_text("title"))
+        self.title_label.setText(self._ui_text("title"))
+        self.people_label.setText(self._ui_text("people"))
+        self.group_title.setText(self._ui_text("group_title"))
+        self.choose_btn.setText(self._ui_text("add"))
+        self.scan_now_btn.setText(self._ui_text("scan_now"))
+        self.search_btn.setText(self._ui_text("search"))
+        self.search_box.setPlaceholderText(self._ui_text("search_placeholder"))
+        self.total_card.title.setText(self._ui_text("total"))
+        self.pending_card.title.setText(self._ui_text("pending"))
+        self.analyzed_card.title.setText(self._ui_text("analyzed"))
+        self.error_card.title.setText(self._ui_text("errors"))
+        self._populate_search_mode_combo(current_search_mode)
+        if self.library_id is None:
+            self.library_label.setText(self._ui_text("no_library_selected"))
+            self.album_title.setText(self._ui_text("default_album"))
+            self.album_subtitle.setText("0 photos")
+            self.status_label.setText(self._ui_text("idle"))
+        self.details_panel.set_language(self.ui_language)
+
+    def _populate_search_mode_combo(self, selected_key: str | None = None):
+        selected_key = selected_key or self._search_mode_key
+        labels = {
+            "mixed": self._ui_text("search_mode_mixed"),
+            "filename": self._ui_text("search_mode_filename"),
+            "semantic": self._ui_text("search_mode_semantic"),
+        }
+        self.search_mode.blockSignals(True)
+        self.search_mode.clear()
+        self.search_mode.addItem(labels["mixed"], "mixed")
+        self.search_mode.addItem(labels["filename"], "filename")
+        self.search_mode.addItem(labels["semantic"], "semantic")
+        index = self.search_mode.findData(selected_key)
+        if index >= 0:
+            self.search_mode.setCurrentIndex(index)
+        self.search_mode.blockSignals(False)
+        self._search_mode_key = str(self.search_mode.currentData() or "mixed")
+
+    def _rebuild_runtime_stack(self):
+        self.analyzer = OpenClipAnalyzer(
+            model_name=self.analyzer_model_name,
+            pretrained=self.analyzer_pretrained,
+            probability_threshold=self.analyzer_probability_threshold,
+        )
+        self.logger.info("open_clip cache root=%s", self.analyzer.model_cache_root)
+        self.analysis_service = AnalysisService(self.analyzer)
+        self.search_service = SemanticSearchService(self.db, self.analysis_service, self.vector_index)
+        self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter(), self.vector_index)
+        self.controller.pipeline = self.pipeline
+    def _on_gallery_data_changed(self, topLeft, bottomRight, roles):
+        if not roles or Qt.DecorationRole in roles:
+            self._layout_reflow_timer.start()  
+
+    def _do_gallery_reflow(self):
+        if hasattr(self, "view") and self.view.model():
+            self.view.doItemsLayout()
+    def _open_settings_dialog(self):
+        if self.controller.scan_running or self.controller.analysis_running:
+            QMessageBox.information(self, self._ui_text("settings_title"), self._ui_text("settings_busy"))
+            return
+
+        dialog = SettingsDialog(
+            self,
+            settings=AppSettings(
+                probability_threshold=self.analyzer_probability_threshold,
+                model_name=self.analyzer_model_name,
+                pretrained=self.analyzer_pretrained,
+                language=self.ui_language,
+            ),
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        values = dialog.values()
+        changed_analyzer = (
+            values.probability_threshold != self.analyzer_probability_threshold
+            or values.model_name != self.analyzer_model_name
+            or values.pretrained != self.analyzer_pretrained
+        )
+        changed_language = values.language != self.ui_language
+
+        self.analyzer_probability_threshold = values.probability_threshold
+        self.analyzer_model_name = values.model_name
+        self.analyzer_pretrained = values.pretrained
+        self.ui_language = values.language
+
+        self.settings.setValue("analyzer/probability_threshold", self.analyzer_probability_threshold)
+        self.settings.setValue("analyzer/model_name", self.analyzer_model_name)
+        self.settings.setValue("analyzer/pretrained", self.analyzer_pretrained)
+        self.settings.setValue("ui/language", self.ui_language)
+
+        if changed_analyzer:
+            self._rebuild_runtime_stack()
+            self._refresh_exiftool_status()
+        if changed_language:
+            self._apply_language()
+        self._set_status(self._ui_text("settings_saved"))
+
+    def _set_details_visible(self, visible: bool):
+        if not hasattr(self, "content_splitter"):
+            return
+        if not visible:
+            sizes = self.content_splitter.sizes()
+            if len(sizes) >= 2 and sizes[1] > 0:
+                self._details_panel_width = max(320, sizes[1])
+            self.details_panel.setVisible(False)
+            sizes = self.content_splitter.sizes()
+            if len(sizes) >= 2:
+                total = max(1, sum(sizes))
+                self.content_splitter.setSizes([total, 0])
+            return
+        self.details_panel.setVisible(True)
+        sizes = self.content_splitter.sizes()
+        if len(sizes) < 2 or sizes[1] > 0:
+            return
+        total = max(1, sum(sizes) or self.content_splitter.width() or self.width() or 1)
+        desired_right = min(560, max(320, self._details_panel_width))
+        if total > 2:
+            desired_right = min(desired_right, total - 1)
+        if desired_right <= 0:
+            return
+        left_size = max(1, total - desired_right)
+        self.content_splitter.setSizes([left_size, desired_right])
+
+    def eventFilter(self, watched, event):
+        if hasattr(self, "view") and watched is self.view.viewport() and event.type() == QEvent.MouseButtonPress:
+            if self.view.indexAt(event.position().toPoint()).isValid():
+                return super().eventFilter(watched, event)
+            if event.button() in (Qt.LeftButton, Qt.RightButton):
+                self.view.clearSelection()
+                self.view.setCurrentIndex(QModelIndex())
+                self.details_panel.set_item(None, [])
+                self._set_details_visible(False)
+        return super().eventFilter(watched, event)
 
     def _selected_gallery_index(self, view_index: QModelIndex | None = None):
         if view_index is not None and view_index.isValid():
@@ -558,34 +559,53 @@ class MainWindow(QMainWindow):
             return None
         return self.gallery_model.item(index.row())
 
+    def _selected_gallery_items(self) -> list:
+        if not hasattr(self, "gallery_model") or self.view.selectionModel() is None:
+            return []
+        rows = sorted({index.row() for index in self.view.selectionModel().selectedIndexes() if index.isValid()})
+        return [item for row in rows if (item := self.gallery_model.item(row)) is not None]
+
     def _show_gallery_context_menu(self, position):
         if not hasattr(self, "gallery_model"):
             return
         view_index = self.view.indexAt(position)
         if not view_index.isValid():
             return
-        self.view.setCurrentIndex(view_index)
-        item = self._selected_gallery_item(view_index)
-        if item is None:
+
+        selection = self.view.selectionModel()
+        if selection is not None and not selection.isSelected(view_index):
+            selection.select(view_index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+            self.view.setCurrentIndex(view_index)
+        elif self.view.currentIndex() != view_index:
+            self.view.setCurrentIndex(view_index)
+
+        items = self._selected_gallery_items()
+        if not items:
             return
+        primary_item = self._selected_gallery_item(view_index) or items[0]
+        multi = len(items) > 1
 
         menu = QMenu(self)
-        open_action = menu.addAction("Open")
-        reveal_action = menu.addAction("Show in Folder")
-        copy_file_action = menu.addAction("Copy File")
-        copy_path_action = menu.addAction("Copy Path")
+        open_action = menu.addAction(self._ui_text("open_selected") if multi else self._ui_text("open"))
+        reveal_action = menu.addAction(self._ui_text("show_in_folder"))
+        copy_file_action = menu.addAction(self._ui_text("copy_files").format(count=len(items)) if multi else self._ui_text("copy_file"))
+        copy_path_action = menu.addAction(self._ui_text("copy_paths").format(count=len(items)) if multi else self._ui_text("copy_path"))
         chosen = menu.exec(self.view.viewport().mapToGlobal(position))
         if chosen == open_action:
-            self._open_file(item.file_path)
+            self._open_files([item.file_path for item in items])
         elif chosen == reveal_action:
-            self._show_in_folder(item.file_path)
+            self._show_in_folder(primary_item.file_path)
         elif chosen == copy_file_action:
-            self._copy_file_to_clipboard(item.file_path)
+            self._copy_files_to_clipboard([item.file_path for item in items])
         elif chosen == copy_path_action:
-            self._copy_path_to_clipboard(item.file_path)
+            self._copy_paths_to_clipboard([item.file_path for item in items])
 
     def _open_file(self, file_path: str):
         QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+
+    def _open_files(self, file_paths: list[str]):
+        for file_path in file_paths:
+            self._open_file(file_path)
 
     def _show_in_folder(self, file_path: str):
         path = Path(file_path)
@@ -598,20 +618,34 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def _copy_file_to_clipboard(self, file_path: str):
+        self._copy_files_to_clipboard([file_path])
+
+    def _copy_files_to_clipboard(self, file_paths: list[str]):
         mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(file_path)])
-        mime.setText(file_path)
+        mime.setUrls([QUrl.fromLocalFile(file_path) for file_path in file_paths])
+        mime.setText("\n".join(file_paths))
         QApplication.clipboard().setMimeData(mime)
 
     def _copy_path_to_clipboard(self, file_path: str):
-        QApplication.clipboard().setText(file_path)
+        self._copy_paths_to_clipboard([file_path])
+
+    def _copy_paths_to_clipboard(self, file_paths: list[str]):
+        QApplication.clipboard().setText("\n".join(file_paths))
 
     def _update_library_action_state(self):
         has_library = self.library_id is not None
         busy = self.controller.scan_running or self.controller.analysis_running
         self.scan_now_btn.setEnabled(has_library and not busy)
-        self.delete_library_btn.setEnabled(has_library and not busy)
-        self.save_excludes_btn.setEnabled(has_library and not busy)
+        self.settings_btn.setEnabled(not busy)
+
+    def _refresh_library_row_selection(self):
+        current_item = self.library_list.currentItem()
+        current_row = self.library_list.row(current_item) if current_item is not None else -1
+        for row in range(self.library_list.count()):
+            item = self.library_list.item(row)
+            widget = self.library_list.itemWidget(item)
+            if widget is not None and hasattr(widget, "set_selected"):
+                widget.set_selected(row == current_row)
 
     def _refresh_exiftool_status(self):
         writer = getattr(self.pipeline, "metadata_writer", None)
@@ -639,12 +673,12 @@ class MainWindow(QMainWindow):
             return
         self.gallery_model.refresh(self.library_id)
         self.view.setModel(self.gallery_model)
-        self._sync_library_excludes_box()
         self._refresh_stats()
         self._update_library_action_state()
 
     def _on_search_mode_changed(self, mode: str):
-        self._search_mode = mode
+        selected = self.search_mode.currentData()
+        self._search_mode_key = str(selected or "mixed")
 
     def _execute_search(self):
         if self.library_id is None or not hasattr(self, "gallery_model"):
@@ -655,17 +689,17 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            if self._search_mode == "Filename":
+            if self._search_mode_key == "filename":
                 rows = self.db.search_files_by_name(self.library_id, query, limit=200)
                 self.gallery_model.set_search_results(self.library_id, rows)
             else:
-                mode = "mixed" if self._search_mode == "Mixed" else "semantic"
+                mode = self._search_mode_key if self._search_mode_key in ("mixed", "semantic") else "mixed"
                 file_ids, score_map, _source_map = self.search_service.search(self.library_id, query, mode=mode, limit=200)
                 rows = self.db.list_files_by_ids(self.library_id, file_ids)
                 self.gallery_model.set_search_results(self.library_id, rows, score_map=score_map)
             self.view.setModel(self.gallery_model)
         except Exception as exc:
-            self._set_status(f"Search failed: {exc}")
+            self._set_status(self._ui_text("search_failed").format(error=exc))
 
     def _refresh_stats(self):
         if self.library_id is None:
@@ -673,12 +707,17 @@ class MainWindow(QMainWindow):
             self.pending_card.set_value("0")
             self.analyzed_card.set_value("0")
             self.error_card.set_value("0")
+            self.people_count.setText("0")
+            self.album_subtitle.setText("0 photos")
             return
         stats = self.db.get_library_stats(self.library_id)
         self.total_card.set_value(str(stats["total_files"] or 0))
         self.pending_card.set_value(str(stats["pending_files"] or 0))
         self.analyzed_card.set_value(str(stats["analyzed_files"] or 0))
         self.error_card.set_value(str(stats["error_files"] or 0))
+        total_files = int(stats["total_files"] or 0)
+        self.people_count.setText(str(total_files))
+        self.album_subtitle.setText(f"{total_files} photos")
 
     def _selected_library_id(self):
         item = self.library_list.currentItem()
@@ -686,21 +725,11 @@ class MainWindow(QMainWindow):
             return None
         return item.data(Qt.UserRole)
 
-    def _sync_library_excludes_box(self):
-        if self.library_id is None:
-            self.excludes_box.setPlainText("")
-            return
-        excludes = self.controller.get_library_excludes(self.library_id)
-        paths = [str(row["path"]) for row in excludes]
-        self.excludes_box.blockSignals(True)
-        self.excludes_box.setPlainText("\n".join(paths))
-        self.excludes_box.blockSignals(False)
-
     def _select_or_add_library(self, root_path: str, *, from_startup: bool = False):
         library_id = self.controller.add_library(root_path)
         self.settings.setValue("lastLibraryPath", str(Path(root_path).resolve()))
         if not from_startup:
-            self._set_status(f"Library added: {root_path}")
+            self._set_status(f"{self._ui_text('library_added')}: {root_path}")
         self._select_library(library_id)
 
     def _select_library(self, library_id: int):
@@ -708,6 +737,7 @@ class MainWindow(QMainWindow):
             item = self.library_list.item(row)
             if item.data(Qt.UserRole) == library_id:
                 self.library_list.setCurrentRow(row)
+                self._refresh_library_row_selection()
                 return
         self.controller.set_active_library(library_id)
 
@@ -718,17 +748,22 @@ class MainWindow(QMainWindow):
         if item is None:
             self.library_id = None
             self.root_path = ""
-            self.library_label.setText("No library selected")
+            self.library_label.setText(self._ui_text("no_library_selected"))
+            self.album_title.setText(self._ui_text("default_album"))
+            self.album_subtitle.setText("0 photos")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
+            self._set_details_visible(False)
+            self._refresh_library_row_selection()
             return
         self._refresh_stats()
         self._update_library_action_state()
         library_id = int(item.data(Qt.UserRole))
         self.controller.set_active_library(library_id)
+        self._refresh_library_row_selection()
 
     def choose_library(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select photo library")
+        directory = QFileDialog.getExistingDirectory(self, self._ui_text("choose_library_prompt"))
         if directory:
             self._select_or_add_library(directory)
 
@@ -738,9 +773,13 @@ class MainWindow(QMainWindow):
         self.library_list.clear()
         for row in libraries:
             label = str(row["root_path"])
-            item = QListWidgetItem(label)
+            display_name = Path(label).name or label
+            full_display_name = f"• {display_name}"
+            item = QListWidgetItem()
+            item.setToolTip(label)
             item.setData(Qt.UserRole, int(row["id"]))
             self.library_list.addItem(item)
+            self._set_library_item_widget(item, full_display_name, label, int(row["id"]))
         if current_id is not None:
             for row_index in range(self.library_list.count()):
                 if int(self.library_list.item(row_index).data(Qt.UserRole)) == current_id:
@@ -750,34 +789,58 @@ class MainWindow(QMainWindow):
                 if self.library_list.count() == 0:
                     self.library_id = None
                     self.root_path = ""
-                    self.library_label.setText("No library selected")
+                    self.library_label.setText(self._ui_text("no_library_selected"))
+                    self.album_title.setText(self._ui_text("default_album"))
+                    self.album_subtitle.setText("0 photos")
                     self.view.setModel(None)
                     self.details_panel.set_item(None, [])
+                    self._set_details_visible(False)
                     self._refresh_stats()
         self._updating_library_list = False
+        self._refresh_library_row_selection()
         if not libraries:
             self.library_id = None
             self.root_path = ""
-            self.library_label.setText("No library selected")
+            self.library_label.setText(self._ui_text("no_library_selected"))
+            self.album_title.setText(self._ui_text("default_album"))
+            self.album_subtitle.setText("0 photos")
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
+            self._set_details_visible(False)
             self._refresh_stats()
         self._update_library_action_state()
+
+    def _set_library_item_widget(self, item: QListWidgetItem, display_name: str, root_path: str, library_id: int):
+        row_widget = LibraryRowWidget(
+            display_name,
+            root_path,
+            lambda lid=library_id, path=root_path: self._delete_library(lid, path),
+        )
+        row_widget.set_delete_tooltip(self._ui_text("delete"))
+        row_widget.setMinimumHeight(40)
+        item.setSizeHint(QSize(row_widget.sizeHint().width(), max(40, row_widget.sizeHint().height())))
+        self.library_list.setItemWidget(item, row_widget)
+        row_widget.set_selected(False)
 
     def _on_active_library_changed(self, library_id: int, root_path: str):
         self.library_id = library_id
         self.root_path = root_path
         self.library_label.setText(root_path)
+        self.album_title.setText(Path(root_path).name or self._ui_text("default_album"))
         if hasattr(self, "gallery_model"):
             self.gallery_model.shutdown()
         self.gallery_model = GalleryModel(self.db, library_id)
+        self.gallery_model.dataChanged.connect(self._on_gallery_data_changed)
         self.view.setModel(self.gallery_model)
         self.view.setIconSize(self.gallery_model._placeholder.size())
         self.view.selectionModel().currentChanged.connect(self._on_current_changed)
+        self.details_panel.set_item(None, [])
+        self._set_details_visible(False)
         self.search_box.blockSignals(True)
         self.search_box.clear()
         self.search_box.blockSignals(False)
         self._set_gallery_library_view()
+        self._refresh_library_row_selection()
 
     def _on_scan_finished(self, summary):
         if self.library_id is not None:
@@ -785,7 +848,12 @@ class MainWindow(QMainWindow):
             if self.search_box.text().strip():
                 self._execute_search()
         self._set_status(
-            f"Scan complete: {summary.root_path} | {summary.files_seen} seen, {summary.files_added + summary.files_updated} changed, {summary.files_deleted} deleted"
+            self._ui_text("scan_complete").format(
+                root_path=summary.root_path,
+                seen=summary.files_seen,
+                changed=summary.files_added + summary.files_updated,
+                deleted=summary.files_deleted,
+            )
         )
 
     def _on_analysis_finished(self, outcomes):
@@ -794,25 +862,21 @@ class MainWindow(QMainWindow):
             if self.search_box.text().strip():
                 self._execute_search()
         self._refresh_exiftool_status()
-        self._set_status(f"Analysis complete: {len(outcomes)} files processed")
+        self._set_status(self._ui_text("analysis_complete").format(count=len(outcomes)))
 
     def _on_current_changed(self, current: QModelIndex, previous: QModelIndex):
         if not current.isValid():
             self.details_panel.set_item(None, [])
+            self._set_details_visible(False)
             return
         item = self.gallery_model.item(current.row())
         if item is None:
             self.details_panel.set_item(None, [])
+            self._set_details_visible(False)
             return
-        tags = self.db.list_tags_for_file(item.file_id)
+        tags=  extract_keywords(read_image_metadata(item.file_path))
         self.details_panel.set_item(item, tags)
-
-    def _save_excludes(self):
-        if self.library_id is None:
-            return
-        paths = [line.strip() for line in self.excludes_box.toPlainText().splitlines() if line.strip()]
-        self.controller.set_library_excludes(self.library_id, paths)
-        self._set_status("Exclude paths saved")
+        self._set_details_visible(True)
 
     def _manual_scan_current_library(self):
         if self.library_id is None:
@@ -820,31 +884,36 @@ class MainWindow(QMainWindow):
         self.logger.info("Manual scan requested for library_id=%s root_path=%s", self.library_id, self.root_path)
         self.controller.scan_library(self.library_id)
         self._update_library_action_state()
-        self._set_status("Manual scan started")
+        self._set_status(self._ui_text("manual_scan_started"))
 
-    def _delete_current_library(self):
-        if self.library_id is None:
-            return
-        library_id = self.library_id
+    def _delete_library(self, library_id: int, root_path: str):
         response = QMessageBox.question(
             self,
-            "Delete Library",
-            f"Delete the selected library?\n\n{self.root_path}",
+            self._ui_text("delete_library_title"),
+            self._ui_text("delete_library_message").format(root_path=root_path),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if response != QMessageBox.Yes:
             return
         try:
-            self.logger.info("Deleting library_id=%s root_path=%s", library_id, self.root_path)
+            self.logger.info("Deleting library_id=%s root_path=%s", library_id, root_path)
             self.controller.remove_library(library_id)
             self.vector_index.delete_library_indexes(library_id)
+            last_library = self.settings.value("lastLibraryPath", "", str)
+            if last_library and Path(last_library).resolve() == Path(root_path).resolve():
+                self.settings.setValue("lastLibraryPath", "")
         except Exception as exc:
             self.logger.exception("Failed to delete library_id=%s", library_id)
-            QMessageBox.critical(self, "Delete Library Failed", str(exc))
+            QMessageBox.critical(self, self._ui_text("delete_library_failed_title"), str(exc))
             return
-        self._set_status("Library deleted")
+        self._set_status(self._ui_text("library_deleted"))
         self._update_library_action_state()
+
+    def _delete_current_library(self):
+        if self.library_id is None:
+            return
+        self._delete_library(self.library_id, self.root_path)
 
     def closeEvent(self, event):
         self.logger.info("Application closing")
@@ -856,6 +925,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication([])
+    app.setWindowIcon(QIcon(r'docs\icon_256x256.ico'))
     window = MainWindow()
     window.show()
     app.exec()
