@@ -50,6 +50,26 @@ QFrame#SidebarFooter {
     background: transparent;
     border: none;
 }
+QWidget#LibraryRowWidget {
+    background: transparent;
+    border-radius: 10px;
+}
+QWidget#LibraryRowWidget:hover {
+    background: #eef4ff;
+}
+QWidget#LibraryRowWidget[selected="true"] {
+    background: #dceaff;
+    border: 1px solid #c3d8f6;
+}
+QFrame#LibraryRowAccent {
+    background: #2f73d9;
+    border-radius: 2px;
+}
+QLabel#LibraryRowName {
+    color: #334155;
+    font-size: 12px;
+    font-weight: 700;
+}
 QFrame#LibraryTools {
     background: #ffffff;
     border: 1px solid #e1e8f2;
@@ -173,6 +193,23 @@ QPushButton#DangerButton {
 QPushButton#DangerButton:hover {
     background: #ffe4e4;
 }
+QPushButton#LibraryDeleteButton {
+    background: #ffffff;
+    color: #c33131;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 24px;
+    max-height: 24px;
+    font-size: 13px;
+    font-weight: 700;
+}
+QPushButton#LibraryDeleteButton:hover {
+    background: #ffecec;
+    border-color: #efb1b1;
+}
 QPushButton#IconButton, QPushButton#SmallIconButton {
     background: transparent;
     border: none;
@@ -262,6 +299,21 @@ QListWidget::item {
     padding: 10px;
     margin: 2px 0;
     color: #475569;
+}
+QListWidget#LibraryList::item {
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    padding: 0px;
+    margin: 0px;
+    min-height: 40px;
+    color: #475569;
+}
+QListWidget#LibraryList::item:hover {
+    background: transparent;
+}
+QListWidget#LibraryList::item:selected {
+    background: #95bcf7;
 }
 QListWidget::item:hover {
     background: #eef4ff;

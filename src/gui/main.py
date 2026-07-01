@@ -5,7 +5,7 @@ import logging
 import sys
 import os
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect
-from PySide6.QtGui import QColor, QDesktopServices, QPalette, QPixmap,QIcon
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -20,12 +20,13 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QMenu,
     QSplitter,
     QVBoxLayout,
     QWidget,
+    QSizePolicy
+    
 )
 
 from src.core.analyzer import AnalysisService, OpenClipAnalyzer
@@ -47,6 +48,74 @@ from src.gui.widgets import DetailsPanel, StatCard
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 qss_path = os.path.join(current_dir, "style.qss")
+
+
+class LibraryRowWidget(QWidget):
+    def __init__(self, display_name: str, root_path: str, delete_callback, parent=None):
+        super().__init__(parent)
+        self._delete_callback = delete_callback
+        self._root_path = root_path
+        self._full_display_name = display_name
+        self.setObjectName("LibraryRowWidget")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 10, 0)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignVCenter)
+        self.accent_bar = QFrame()
+        self.accent_bar.setObjectName("LibraryRowAccent")
+        self.accent_bar.setFixedWidth(4)
+        self.accent_bar.hide()
+
+        self.name_label = QLabel(self._full_display_name)
+        self.name_label.setObjectName("LibraryRowName")
+        self.name_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        self.delete_btn = QPushButton("🗑")
+        self.delete_btn.setObjectName("LibraryDeleteButton")
+        self.delete_btn.clicked.connect(self._on_delete_clicked)
+        self.delete_btn.hide()
+
+        layout.addWidget(self.accent_bar, 0, Qt.AlignVCenter)
+        layout.addWidget(self.name_label, 1,Qt.AlignVCenter)
+        layout.addWidget(self.delete_btn, 0,Qt.AlignVCenter)
+        self.setMinimumHeight(40)
+        self._update_elided_text()
+
+    def _on_delete_clicked(self):
+        if callable(self._delete_callback):
+            self._delete_callback()
+
+    def set_delete_tooltip(self, text: str):
+        self.delete_btn.setToolTip(text)
+
+    def set_selected(self, selected: bool):
+        self.setProperty("selected", selected)
+        self.accent_bar.setVisible(selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def enterEvent(self, event):
+        self.delete_btn.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.delete_btn.hide()
+        super().leaveEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self):
+        metrics = self.name_label.fontMetrics()
+        available = max(80, self.name_label.width() or self.width() - 78)
+        elided = metrics.elidedText(self._full_display_name, Qt.ElideRight, available)
+        self.name_label.setText(elided)
+        # self.name_label.setText(metrics.elidedText(self.name_label.toolTip(), Qt.ElideRight, available))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -163,8 +232,11 @@ class MainWindow(QMainWindow):
         left_layout.addLayout(group_header)
 
         self.library_list = QListWidget()
+        self.library_list.setObjectName("LibraryList")
         self.library_list.currentRowChanged.connect(self._select_library_by_row)
         left_layout.addWidget(self.library_list, 1)
+
+        left_layout.addStretch(1)
 
         sidebar_footer = QFrame()
         sidebar_footer.setObjectName("SidebarFooter")
@@ -189,38 +261,11 @@ class MainWindow(QMainWindow):
         self.library_label = QLabel("No library selected")
         self.library_label.setObjectName("LibraryPathLabel")
         self.library_label.setWordWrap(True)
-
-        # self.excludes_box = QPlainTextEdit()
-        # self.excludes_box.setPlaceholderText("One exclude path per line")
-        # self.excludes_box.setMinimumHeight(82)
-        # self.excludes_box.setMaximumHeight(110)
-
-        # self.save_excludes_btn = QPushButton("Save Excludes")
-        # self.save_excludes_btn.clicked.connect(self._save_excludes)
-        # self.save_excludes_btn.setObjectName("SecondaryButton")
+        self.library_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         self.scan_now_btn = QPushButton("Scan Now")
         self.scan_now_btn.clicked.connect(self._manual_scan_current_library)
         self.scan_now_btn.setObjectName("SecondaryButton")
-
-        self.delete_library_btn = QPushButton("Delete")
-        self.delete_library_btn.clicked.connect(self._delete_current_library)
-        self.delete_library_btn.setObjectName("DangerButton")
-
-        library_tools = QFrame()
-        library_tools.setObjectName("LibraryTools")
-        tools_layout = QVBoxLayout(library_tools)
-        tools_layout.setContentsMargins(10, 10, 10, 10)
-        tools_layout.setSpacing(8)
-        tools_layout.addWidget(self.library_label)
-        # tools_layout.addWidget(self.excludes_box)
-        # tools_layout.addWidget(self.save_excludes_btn)
-        tool_buttons = QHBoxLayout()
-        tool_buttons.setSpacing(8)
-        tool_buttons.addWidget(self.scan_now_btn)
-        tool_buttons.addWidget(self.delete_library_btn)
-        tools_layout.addLayout(tool_buttons)
-        left_layout.addWidget(library_tools)
 
         main_panel = QFrame()
         main_panel.setObjectName("MainPanel")
@@ -240,12 +285,17 @@ class MainWindow(QMainWindow):
 
         content_header = QHBoxLayout()
         title_column = QVBoxLayout()
-        title_column.setSpacing(2)
+        title_column.setSpacing(4)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
         self.album_title = QLabel("Default Album")
         self.album_title.setObjectName("AlbumTitle")
         self.album_subtitle = QLabel("0 photos")
         self.album_subtitle.setObjectName("AlbumSubtitle")
-        title_column.addWidget(self.album_title)
+        title_row.addWidget(self.album_title, 0)
+        title_row.addWidget(self.library_label, 1)
+        title_row.addWidget(self.scan_now_btn, 0)
+        title_column.addLayout(title_row)
         title_column.addWidget(self.album_subtitle)
         content_header.addLayout(title_column, 1)
 
@@ -338,9 +388,7 @@ class MainWindow(QMainWindow):
         self.people_label.setText(self._ui_text("people"))
         self.group_title.setText(self._ui_text("group_title"))
         self.choose_btn.setText(self._ui_text("add"))
-        # self.save_excludes_btn.setText(self._ui_text("save_excludes"))
         self.scan_now_btn.setText(self._ui_text("scan_now"))
-        self.delete_library_btn.setText(self._ui_text("delete"))
         self.search_btn.setText(self._ui_text("search"))
         self.search_box.setPlaceholderText(self._ui_text("search_placeholder"))
         self.total_card.title.setText(self._ui_text("total"))
@@ -552,9 +600,16 @@ class MainWindow(QMainWindow):
         has_library = self.library_id is not None
         busy = self.controller.scan_running or self.controller.analysis_running
         self.scan_now_btn.setEnabled(has_library and not busy)
-        self.delete_library_btn.setEnabled(has_library and not busy)
-        # self.save_excludes_btn.setEnabled(has_library and not busy)
         self.settings_btn.setEnabled(not busy)
+
+    def _refresh_library_row_selection(self):
+        current_item = self.library_list.currentItem()
+        current_row = self.library_list.row(current_item) if current_item is not None else -1
+        for row in range(self.library_list.count()):
+            item = self.library_list.item(row)
+            widget = self.library_list.itemWidget(item)
+            if widget is not None and hasattr(widget, "set_selected"):
+                widget.set_selected(row == current_row)
 
     def _refresh_exiftool_status(self):
         writer = getattr(self.pipeline, "metadata_writer", None)
@@ -582,7 +637,6 @@ class MainWindow(QMainWindow):
             return
         self.gallery_model.refresh(self.library_id)
         self.view.setModel(self.gallery_model)
-        # self._sync_library_excludes_box()
         self._refresh_stats()
         self._update_library_action_state()
 
@@ -635,16 +689,6 @@ class MainWindow(QMainWindow):
             return None
         return item.data(Qt.UserRole)
 
-    def _sync_library_excludes_box(self):
-        if self.library_id is None:
-            self.excludes_box.setPlainText("")
-            return
-        excludes = self.controller.get_library_excludes(self.library_id)
-        paths = [str(row["path"]) for row in excludes]
-        self.excludes_box.blockSignals(True)
-        self.excludes_box.setPlainText("\n".join(paths))
-        self.excludes_box.blockSignals(False)
-
     def _select_or_add_library(self, root_path: str, *, from_startup: bool = False):
         library_id = self.controller.add_library(root_path)
         self.settings.setValue("lastLibraryPath", str(Path(root_path).resolve()))
@@ -657,6 +701,7 @@ class MainWindow(QMainWindow):
             item = self.library_list.item(row)
             if item.data(Qt.UserRole) == library_id:
                 self.library_list.setCurrentRow(row)
+                self._refresh_library_row_selection()
                 return
         self.controller.set_active_library(library_id)
 
@@ -673,11 +718,13 @@ class MainWindow(QMainWindow):
             self.view.setModel(None)
             self.details_panel.set_item(None, [])
             self._set_details_visible(False)
+            self._refresh_library_row_selection()
             return
         self._refresh_stats()
         self._update_library_action_state()
         library_id = int(item.data(Qt.UserRole))
         self.controller.set_active_library(library_id)
+        self._refresh_library_row_selection()
 
     def choose_library(self):
         directory = QFileDialog.getExistingDirectory(self, self._ui_text("choose_library_prompt"))
@@ -691,10 +738,12 @@ class MainWindow(QMainWindow):
         for row in libraries:
             label = str(row["root_path"])
             display_name = Path(label).name or label
-            item = QListWidgetItem(f"• {display_name}")
+            full_display_name = f"• {display_name}"
+            item = QListWidgetItem()
             item.setToolTip(label)
             item.setData(Qt.UserRole, int(row["id"]))
             self.library_list.addItem(item)
+            self._set_library_item_widget(item, full_display_name, label, int(row["id"]))
         if current_id is not None:
             for row_index in range(self.library_list.count()):
                 if int(self.library_list.item(row_index).data(Qt.UserRole)) == current_id:
@@ -712,6 +761,7 @@ class MainWindow(QMainWindow):
                     self._set_details_visible(False)
                     self._refresh_stats()
         self._updating_library_list = False
+        self._refresh_library_row_selection()
         if not libraries:
             self.library_id = None
             self.root_path = ""
@@ -723,6 +773,18 @@ class MainWindow(QMainWindow):
             self._set_details_visible(False)
             self._refresh_stats()
         self._update_library_action_state()
+
+    def _set_library_item_widget(self, item: QListWidgetItem, display_name: str, root_path: str, library_id: int):
+        row_widget = LibraryRowWidget(
+            display_name,
+            root_path,
+            lambda lid=library_id, path=root_path: self._delete_library(lid, path),
+        )
+        row_widget.set_delete_tooltip(self._ui_text("delete"))
+        row_widget.setMinimumHeight(40)
+        item.setSizeHint(QSize(row_widget.sizeHint().width(), max(40, row_widget.sizeHint().height())))
+        self.library_list.setItemWidget(item, row_widget)
+        row_widget.set_selected(False)
 
     def _on_active_library_changed(self, library_id: int, root_path: str):
         self.library_id = library_id
@@ -741,6 +803,7 @@ class MainWindow(QMainWindow):
         self.search_box.clear()
         self.search_box.blockSignals(False)
         self._set_gallery_library_view()
+        self._refresh_library_row_selection()
 
     def _on_scan_finished(self, summary):
         if self.library_id is not None:
@@ -778,13 +841,6 @@ class MainWindow(QMainWindow):
         self.details_panel.set_item(item, tags)
         self._set_details_visible(True)
 
-    def _save_excludes(self):
-        if self.library_id is None:
-            return
-        paths = [line.strip() for line in self.excludes_box.toPlainText().splitlines() if line.strip()]
-        self.controller.set_library_excludes(self.library_id, paths)
-        self._set_status(self._ui_text("exclude_saved"))
-
     def _manual_scan_current_library(self):
         if self.library_id is None:
             return
@@ -793,21 +849,18 @@ class MainWindow(QMainWindow):
         self._update_library_action_state()
         self._set_status(self._ui_text("manual_scan_started"))
 
-    def _delete_current_library(self):
-        if self.library_id is None:
-            return
-        library_id = self.library_id
+    def _delete_library(self, library_id: int, root_path: str):
         response = QMessageBox.question(
             self,
             self._ui_text("delete_library_title"),
-            self._ui_text("delete_library_message").format(root_path=self.root_path),
+            self._ui_text("delete_library_message").format(root_path=root_path),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if response != QMessageBox.Yes:
             return
         try:
-            self.logger.info("Deleting library_id=%s root_path=%s", library_id, self.root_path)
+            self.logger.info("Deleting library_id=%s root_path=%s", library_id, root_path)
             self.controller.remove_library(library_id)
             self.vector_index.delete_library_indexes(library_id)
         except Exception as exc:
@@ -816,6 +869,11 @@ class MainWindow(QMainWindow):
             return
         self._set_status(self._ui_text("library_deleted"))
         self._update_library_action_state()
+
+    def _delete_current_library(self):
+        if self.library_id is None:
+            return
+        self._delete_library(self.library_id, self.root_path)
 
     def closeEvent(self, event):
         self.logger.info("Application closing")
