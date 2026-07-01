@@ -302,7 +302,27 @@ class GalleryModel(QAbstractListModel):
 
     @Slot(int, QImage)
     def _on_thumbnail_ready(self, file_id: int, image: QImage):
-        pixmap = QPixmap.fromImage(image)
+        original_pixmap = QPixmap.fromImage(image)
+        target_size = QSize(320, 320)
+        if original_pixmap.size() != target_size:
+            pixmap = QPixmap(target_size)
+            pixmap.fill(Qt.transparent)
+            
+            scaled_pixmap = original_pixmap.scaled(
+                target_size, 
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            )
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            x = (target_size.width() - scaled_pixmap.width()) // 2
+            y = (target_size.height() - scaled_pixmap.height()) // 2
+            painter.drawPixmap(x, y, scaled_pixmap)
+            painter.end()
+        else:
+            pixmap = original_pixmap
+        # ------------------------------------
+
         self._thumb_cache[file_id] = pixmap
         self._thumb_cache.move_to_end(file_id)
         if len(self._thumb_cache) > self.MAX_CACHE_SIZE:

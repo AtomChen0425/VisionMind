@@ -270,7 +270,7 @@ class MainWindow(QMainWindow):
         self.view.setSpacing(16)
         self.view.setWrapping(True)
         self.view.setIconSize(QSize(220, 220))
-        # self.view.setUniformItemSizes(True)
+        self.view.setUniformItemSizes(True)
         self.view.setWordWrap(True)
         self.view.setSelectionMode(QListView.ExtendedSelection)
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
