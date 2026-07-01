@@ -3,7 +3,6 @@
 from pathlib import Path
 import logging
 import sys
-import os
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect,QTimer
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
@@ -32,6 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.analyzer import AnalysisService, OpenClipAnalyzer
+from src.core.app_paths import get_database_path, get_exiftool_dir
+from src.core.app_paths import get_resource_path
 from src.core.database import DatabaseManager
 from src.core.logging_utils import setup_logging
 from src.core.metadata_reader import read_image_metadata,extract_keywords
@@ -48,8 +49,7 @@ from src.gui.settings_dialog import AppSettings, SettingsDialog
 
 from src.gui.widgets import DetailsPanel, StatCard
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-qss_path = os.path.join(current_dir, "style.qss")
+qss_path = get_resource_path("src", "gui", "style.qss")
 
 
 class LibraryRowWidget(QWidget):
@@ -140,7 +140,7 @@ class MainWindow(QMainWindow):
 
         self.log_path = setup_logging()
         self.logger.info("Application starting")
-        self.db = DatabaseManager("data/photo_manager.db")
+        self.db = DatabaseManager(get_database_path())
         self.scanner = Scanner(self.db)
 
         self.settings = QSettings("PhotoManager", "PhotoManager")
@@ -661,7 +661,7 @@ class MainWindow(QMainWindow):
 
         if exiftool_path is None:
             self.exiftool_status_label.setText("ExifTool: not ready")
-            self.exiftool_path_label.setText("Will download on first write into data/tools/exiftool")
+            self.exiftool_path_label.setText(f"Will download on first write into {get_exiftool_dir()}")
             return
 
         resolved_path = str(Path(exiftool_path).resolve())
@@ -925,7 +925,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication([])
-    app.setWindowIcon(QIcon(r'docs\icon_256x256.ico'))
+    app.setWindowIcon(QIcon(str(get_resource_path("docs", "icon_256x256.ico"))))
     window = MainWindow()
     window.show()
     app.exec()

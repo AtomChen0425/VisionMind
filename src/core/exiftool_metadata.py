@@ -9,6 +9,7 @@ except ImportError:  # pragma: no cover - only hit when dependency is missing
     ExifToolHelper = None
 
 from .exiftool_manager import ExifToolManager
+from .app_paths import get_exiftool_dir
 from .metadata_reader import extract_keywords, extract_title, read_image_metadata
 from .supported_image_types import METADATA_SUPPORTED_IMAGE_EXTENSIONS
 
@@ -18,7 +19,7 @@ class ExifToolTagWriter:
 
     def __init__(
         self,
-        tool_dir: str | Path = "data/tools/exiftool",
+        tool_dir: str | Path = get_exiftool_dir(),
         exiftool_path: str | Path | None = None,
     ):
         self.manager = ExifToolManager(tool_dir)

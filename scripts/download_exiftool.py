@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.core.app_paths import get_exiftool_dir
 from src.core.exiftool_manager import ExifToolManager
 
 
@@ -17,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ensure ExifTool is available in a local folder.")
     parser.add_argument(
         "--tool-dir",
-        default="data/tools/exiftool",
+        default=str(get_exiftool_dir()),
         help="Folder to search for or download ExifTool into.",
     )
     parser.add_argument(

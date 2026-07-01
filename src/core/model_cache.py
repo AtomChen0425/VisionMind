@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .app_paths import get_model_dir
+
 _MODEL_CACHE_CONFIGURED = False
 
 
-def configure_model_cache(base_dir: str | Path = "data/model") -> Path:
+def configure_model_cache(base_dir: str | Path = get_model_dir()) -> Path:
     global _MODEL_CACHE_CONFIGURED
 
     root = Path(base_dir)

@@ -6,10 +6,12 @@ import shutil
 from pathlib import Path
 from typing import Sequence
 
+from .app_paths import get_labels_manifest_path
+
 logger = logging.getLogger(__name__)
 
 TEMPLATE_PATH = Path(__file__).with_name("default_labels.md")
-RUNTIME_PATH = Path("data/labels.md")
+RUNTIME_PATH = get_labels_manifest_path()
 
 
 def ensure_label_manifest(runtime_path: str | Path = RUNTIME_PATH) -> Path:

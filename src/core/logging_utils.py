@@ -4,10 +4,12 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from .app_paths import get_logs_dir
+
 _LOG_CONFIGURED = False
 
 
-def setup_logging(log_dir: str | Path = "data/logs", *, level: int = logging.DEBUG) -> Path:
+def setup_logging(log_dir: str | Path = get_logs_dir(), *, level: int = logging.DEBUG) -> Path:
     global _LOG_CONFIGURED
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)

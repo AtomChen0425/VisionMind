@@ -9,12 +9,14 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from .app_paths import get_exiftool_dir
+
 
 EXIFTOOL_HOME_URL = "https://exiftool.org/"
 
 
 class ExifToolManager:
-    def __init__(self, tool_dir: str | Path = "data/tools/exiftool"):
+    def __init__(self, tool_dir: str | Path = get_exiftool_dir()):
         self.tool_dir = Path(tool_dir)
 
     @staticmethod
