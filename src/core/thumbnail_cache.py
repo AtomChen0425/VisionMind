@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from .app_paths import get_thumbnail_cache_dir
+
 
 class ThumbnailCache:
-    def __init__(self, cache_dir: str | Path = "data/cache/thumbnails"):
+    def __init__(self, cache_dir: str | Path = get_thumbnail_cache_dir()):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 

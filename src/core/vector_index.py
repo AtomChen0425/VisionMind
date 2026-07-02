@@ -12,12 +12,13 @@ except Exception:  # pragma: no cover - dependency availability is environment-s
     faiss = None
 
 from .database import DatabaseManager
+from .app_paths import get_index_dir
 
 logger = logging.getLogger(__name__)
 
 
 class VectorIndexManager:
-    def __init__(self, db: DatabaseManager, base_dir: str | Path = "data/indexes"):
+    def __init__(self, db: DatabaseManager, base_dir: str | Path = get_index_dir()):
         self.db = db
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)

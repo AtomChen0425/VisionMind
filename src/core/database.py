@@ -7,9 +7,11 @@ from typing import Iterable, Sequence
 
 import os
 
+from .app_paths import get_database_path
+
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "data/photo_manager.db"):
+    def __init__(self, db_path: str | Path = get_database_path()):
         self.db_path = db_path
         self._memory_connection = sqlite3.connect(":memory:") if db_path == ":memory:" else None
         if self._memory_connection is not None:

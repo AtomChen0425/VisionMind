@@ -3,7 +3,6 @@
 from pathlib import Path
 import logging
 import sys
-import os
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect,QTimer
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
@@ -32,24 +31,27 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.analyzer import AnalysisService, OpenClipAnalyzer
+from src.core.app_paths import get_database_path, get_exiftool_dir
+from src.core.app_paths import get_resource_path
 from src.core.database import DatabaseManager
 from src.core.logging_utils import setup_logging
 from src.core.metadata_reader import read_image_metadata,extract_keywords
 from src.core.semantic_search import SemanticSearchService
 from src.core.pipeline import PhotoProcessingPipeline
 from src.core.exiftool_metadata import ExifToolTagWriter
+from src.core.model_bootstrap import is_pretrained_cached
 from src.core.scanner import Scanner
 from src.core.vector_index import VectorIndexManager
 from src.gui.automation import AutoLibraryController
 from src.gui.i18n import normalize_language, tr
 from src.gui.gallery import GalleryModel
 from src.gui.settings_dialog import AppSettings, SettingsDialog
+from src.gui.startup_bootstrap_dialog import StartupBootstrapDialog
 
 
 from src.gui.widgets import DetailsPanel, StatCard
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-qss_path = os.path.join(current_dir, "style.qss")
+qss_path = get_resource_path("src", "gui", "style.qss")
 
 
 class LibraryRowWidget(QWidget):
@@ -140,7 +142,7 @@ class MainWindow(QMainWindow):
 
         self.log_path = setup_logging()
         self.logger.info("Application starting")
-        self.db = DatabaseManager("data/photo_manager.db")
+        self.db = DatabaseManager(get_database_path())
         self.scanner = Scanner(self.db)
 
         self.settings = QSettings("PhotoManager", "PhotoManager")
@@ -661,12 +663,58 @@ class MainWindow(QMainWindow):
 
         if exiftool_path is None:
             self.exiftool_status_label.setText("ExifTool: not ready")
-            self.exiftool_path_label.setText("Will download on first write into data/tools/exiftool")
+            self.exiftool_path_label.setText(f"Will download on first write into {get_exiftool_dir()}")
             return
 
         resolved_path = str(Path(exiftool_path).resolve())
         self.exiftool_status_label.setText("ExifTool: ready")
         self.exiftool_path_label.setText(resolved_path)
+
+    def _bootstrap_open_clip_model(self):
+        if getattr(self, "_open_clip_bootstrap_done", False):
+            return
+        self._open_clip_bootstrap_done = True
+        try:
+            model_cached = is_pretrained_cached(
+                self.analyzer_model_name,
+                self.analyzer_pretrained,
+                cache_dir=self.analyzer.model_cache_root,
+            )
+            exiftool_ready = getattr(self.pipeline, "metadata_writer", None)
+            exiftool_path = None
+            if exiftool_ready is not None:
+                exiftool_path = getattr(self.pipeline.metadata_writer, "exiftool_path", None)
+                if exiftool_path is None:
+                    manager = getattr(self.pipeline.metadata_writer, "manager", None)
+                    if manager is not None:
+                        exiftool_path = manager.find_exiftool()
+            if model_cached and exiftool_path is not None and Path(exiftool_path).exists():
+                self.logger.info("Startup resources already cached")
+                self._refresh_exiftool_status()
+                return
+
+            self.logger.info(
+                "Preparing startup resources model_cached=%s exiftool_ready=%s",
+                model_cached,
+                exiftool_path is not None and Path(exiftool_path).exists(),
+            )
+            dialog = StartupBootstrapDialog(
+                self.analyzer_model_name,
+                self.analyzer_pretrained,
+                str(self.analyzer.model_cache_root),
+                str(get_exiftool_dir()),
+                self,
+            )
+            if not dialog.start():
+                QMessageBox.warning(
+                    self,
+                    self._ui_text("settings_title"),
+                    "Startup resources are not ready yet. The application will continue, but AI analysis and metadata writing may fail until downloads finish.",
+                )
+            self._refresh_exiftool_status()
+        except Exception as exc:
+            self.logger.exception("Failed to bootstrap startup resources")
+            QMessageBox.warning(self, self._ui_text("settings_title"), str(exc))
 
     def _set_gallery_library_view(self):
         if self.library_id is None:
@@ -925,9 +973,10 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication([])
-    app.setWindowIcon(QIcon(r'docs\icon_256x256.ico'))
+    app.setWindowIcon(QIcon(str(get_resource_path("docs", "icon_256x256.ico"))))
     window = MainWindow()
     window.show()
+    QTimer.singleShot(0, window._bootstrap_open_clip_model)
     app.exec()
 
 
