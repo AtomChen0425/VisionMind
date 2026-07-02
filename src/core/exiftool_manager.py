@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import platform
 import re
-import shutil
 import stat
 import tarfile
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 from .app_paths import get_exiftool_dir
 
 
 EXIFTOOL_HOME_URL = "https://exiftool.org/"
+ProgressCallback = Callable[[str, int, int | None], None]
+
+
+def _emit(progress_callback: ProgressCallback | None, stage: str, current: int, total: int | None) -> None:
+    if progress_callback is not None:
+        progress_callback(stage, current, total)
 
 
 class ExifToolManager:
@@ -60,15 +66,37 @@ class ExifToolManager:
         raise RuntimeError(f"Unsupported platform: {platform.system()}")
 
     @staticmethod
-    def _download_text(url: str) -> str:
+    def _download_text(url: str, progress_callback: ProgressCallback | None = None, stage: str = "fetch") -> str:
         with urllib.request.urlopen(url) as response:
-            return response.read().decode("utf-8", errors="replace")
+            total = response.headers.get("Content-Length")
+            total_int = int(total) if total and total.isdigit() else None
+            chunks: list[bytes] = []
+            received = 0
+            _emit(progress_callback, stage, 0, total_int)
+            while True:
+                buffer = response.read(8192)
+                if not buffer:
+                    break
+                chunks.append(buffer)
+                received += len(buffer)
+                _emit(progress_callback, stage, received, total_int)
+            return b"".join(chunks).decode("utf-8", errors="replace")
 
     @staticmethod
-    def _download_file(url: str, target_path: Path):
+    def _download_file(url: str, target_path: Path, progress_callback: ProgressCallback | None = None, stage: str = "download"):
         target_path.parent.mkdir(parents=True, exist_ok=True)
         with urllib.request.urlopen(url) as response, open(target_path, "wb") as target_file:
-            shutil.copyfileobj(response, target_file)
+            total = response.headers.get("Content-Length")
+            total_int = int(total) if total and total.isdigit() else None
+            received = 0
+            _emit(progress_callback, stage, 0, total_int)
+            while True:
+                buffer = response.read(1024 * 64)
+                if not buffer:
+                    break
+                target_file.write(buffer)
+                received += len(buffer)
+                _emit(progress_callback, stage, received, total_int)
 
     @staticmethod
     def _safe_extract_tar(archive: tarfile.TarFile, target_dir: Path):
@@ -99,21 +127,23 @@ class ExifToolManager:
                 return matches[0]
         return None
 
-    def download_exiftool(self) -> Path:
+    def download_exiftool(self, progress_callback: ProgressCallback | None = None) -> Path:
         if not self.is_supported_platform():
             raise RuntimeError(f"Unsupported platform: {platform.system()}")
 
         self.tool_dir.mkdir(parents=True, exist_ok=True)
-        html = self._download_text(EXIFTOOL_HOME_URL)
+        _emit(progress_callback, "exiftool-check", 0, None)
+        html = self._download_text(EXIFTOOL_HOME_URL, progress_callback, "exiftool-home")
         version = self._home_page_version(html)
         archive_url = self._archive_url(version)
 
         archive_name = archive_url.rsplit("/", 2)[-2]
         archive_path = self.tool_dir / archive_name
 
-        self._download_file(archive_url, archive_path)
+        self._download_file(archive_url, archive_path, progress_callback, "exiftool-archive")
 
         try:
+            _emit(progress_callback, "exiftool-extract", 0, 1)
             if archive_path.suffix.lower() == ".zip":
                 with zipfile.ZipFile(archive_path) as archive:
                     self._safe_extract_zip(archive, self.tool_dir)
@@ -131,10 +161,11 @@ class ExifToolManager:
 
         if not self.is_windows():
             exiftool.chmod(exiftool.stat().st_mode | stat.S_IEXEC)
+        _emit(progress_callback, "exiftool-ready", 1, 1)
         return exiftool
 
-    def ensure_exiftool(self) -> Path:
+    def ensure_exiftool(self, progress_callback: ProgressCallback | None = None) -> Path:
         existing = self.find_exiftool()
         if existing is not None:
             return existing
-        return self.download_exiftool()
+        return self.download_exiftool(progress_callback=progress_callback)
