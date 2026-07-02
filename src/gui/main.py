@@ -39,11 +39,13 @@ from src.core.metadata_reader import read_image_metadata,extract_keywords
 from src.core.semantic_search import SemanticSearchService
 from src.core.pipeline import PhotoProcessingPipeline
 from src.core.exiftool_metadata import ExifToolTagWriter
+from src.core.model_bootstrap import is_pretrained_cached
 from src.core.scanner import Scanner
 from src.core.vector_index import VectorIndexManager
 from src.gui.automation import AutoLibraryController
 from src.gui.i18n import normalize_language, tr
 from src.gui.gallery import GalleryModel
+from src.gui.model_download_dialog import ModelDownloadDialog
 from src.gui.settings_dialog import AppSettings, SettingsDialog
 
 
@@ -668,6 +670,41 @@ class MainWindow(QMainWindow):
         self.exiftool_status_label.setText("ExifTool: ready")
         self.exiftool_path_label.setText(resolved_path)
 
+    def _bootstrap_open_clip_model(self):
+        if getattr(self, "_open_clip_bootstrap_done", False):
+            return
+        self._open_clip_bootstrap_done = True
+        try:
+            if is_pretrained_cached(
+                self.analyzer_model_name,
+                self.analyzer_pretrained,
+                cache_dir=self.analyzer.model_cache_root,
+            ):
+                self.logger.info("open_clip pretrained weights already cached")
+                return
+
+            self.logger.info(
+                "Preparing open_clip pretrained weights model=%s pretrained=%s cache=%s",
+                self.analyzer_model_name,
+                self.analyzer_pretrained,
+                self.analyzer.model_cache_root,
+            )
+            dialog = ModelDownloadDialog(
+                self.analyzer_model_name,
+                self.analyzer_pretrained,
+                str(self.analyzer.model_cache_root),
+                self,
+            )
+            if not dialog.start():
+                QMessageBox.warning(
+                    self,
+                    self._ui_text("settings_title"),
+                    "OpenCLIP model is not ready yet. The application will continue, but AI analysis may fail until the model is downloaded.",
+                )
+        except Exception as exc:
+            self.logger.exception("Failed to bootstrap open_clip weights")
+            QMessageBox.warning(self, self._ui_text("settings_title"), str(exc))
+
     def _set_gallery_library_view(self):
         if self.library_id is None:
             return
@@ -928,6 +965,7 @@ def main():
     app.setWindowIcon(QIcon(str(get_resource_path("docs", "icon_256x256.ico"))))
     window = MainWindow()
     window.show()
+    QTimer.singleShot(0, window._bootstrap_open_clip_model)
     app.exec()
 
 
