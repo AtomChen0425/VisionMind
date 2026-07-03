@@ -2,8 +2,8 @@ name: Windows Build
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,7 +29,13 @@ jobs:
         shell: powershell
         run: |
           $shortSha = $env:GITHUB_SHA.Substring(0, 7)
-          $version = "v0.0.$($env:GITHUB_RUN_NUMBER)"
+          $version = $env:GITHUB_REF_NAME
+          if (-not $version) {
+            $version = git describe --tags --abbrev=0 2>$null
+          }
+          if (-not $version) {
+            $version = "v0.0.0"
+          }
           $releaseName = "PhotoManager $version"
           $zipName = "PhotoManager-$version-windows-$shortSha.zip"
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -73,7 +81,7 @@ jobs:
       - name: Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
+          tag_name: ${{ env.APP_VERSION }}
           name: ${{ env.RELEASE_NAME }}
           body: Automated Windows build for ${{ env.APP_VERSION }}.
           files: ${{ env.ZIP_PATH }}
