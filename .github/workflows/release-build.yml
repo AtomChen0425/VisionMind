@@ -99,8 +99,10 @@ jobs:
             --windowed \
             --onedir \
             --name VisionMind \
+            --icon docs/icon.icns \
             --add-data "src/gui/style.qss:src/gui" \
             --add-data "src/core/default_labels.md:src/core" \
+            --add-data "docs/icon.icns:docs" \
             --collect-all open_clip \
             --collect-all huggingface_hub \
             --collect-all tqdm \
