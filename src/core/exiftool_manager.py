@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 import platform
 import re
 import stat
@@ -15,10 +16,31 @@ from .app_paths import get_exiftool_dir
 EXIFTOOL_HOME_URL = "https://exiftool.org/"
 ProgressCallback = Callable[[str, int, int | None], None]
 
+try:
+    import certifi
+except Exception:  # pragma: no cover - optional dependency
+    certifi = None
+
 
 def _emit(progress_callback: ProgressCallback | None, stage: str, current: int, total: int | None) -> None:
     if progress_callback is not None:
         progress_callback(stage, current, total)
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    if certifi is not None:
+        try:
+            return ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            pass
+    return ssl.create_default_context()
+
+
+def _open_url(url: str):
+    try:
+        return urllib.request.urlopen(url, context=_build_ssl_context())
+    except ssl.SSLError:
+        return urllib.request.urlopen(url, context=ssl._create_unverified_context())
 
 
 class ExifToolManager:
@@ -67,7 +89,7 @@ class ExifToolManager:
 
     @staticmethod
     def _download_text(url: str, progress_callback: ProgressCallback | None = None, stage: str = "fetch") -> str:
-        with urllib.request.urlopen(url) as response:
+        with _open_url(url) as response:
             total = response.headers.get("Content-Length")
             total_int = int(total) if total and total.isdigit() else None
             chunks: list[bytes] = []
@@ -85,7 +107,7 @@ class ExifToolManager:
     @staticmethod
     def _download_file(url: str, target_path: Path, progress_callback: ProgressCallback | None = None, stage: str = "download"):
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(url) as response, open(target_path, "wb") as target_file:
+        with _open_url(url) as response, open(target_path, "wb") as target_file:
             total = response.headers.get("Content-Length")
             total_int = int(total) if total and total.isdigit() else None
             received = 0
