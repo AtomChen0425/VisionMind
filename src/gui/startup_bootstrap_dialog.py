@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -70,11 +70,14 @@ class _BootstrapWorker(QObject):
 
 
 class StartupBootstrapDialog(QDialog):
+    completed = Signal(bool)
+
     def __init__(self, model_name: str, pretrained: str, model_cache_dir: str, exiftool_dir: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Preparing application resources")
-        self.setModal(True)
+        self.setModal(False)
         self.resize(640, 320)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         self.setObjectName("StartupBootstrapDialog")
 
         self._model_name = model_name
@@ -117,7 +120,7 @@ class StartupBootstrapDialog(QDialog):
         self._close_button = buttons.button(QDialogButtonBox.Close)
         outer.addWidget(buttons)
 
-    def start(self) -> bool:
+    def start(self):
         self._thread = QThread(self)
         self._worker = _BootstrapWorker(
             self._model_name,
@@ -136,7 +139,7 @@ class StartupBootstrapDialog(QDialog):
         self._worker.finished.connect(lambda *_: self._thread.quit())
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.start()
-        return self.exec() == QDialog.Accepted
+        self.show()
 
     def _append_log(self, text: str):
         self.log_box.appendPlainText(text)
@@ -177,7 +180,8 @@ class StartupBootstrapDialog(QDialog):
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
         self._close_button.setEnabled(True)
-        self.accept()
+        self.completed.emit(True)
+        self.close()
 
     def _on_failed(self, message: str):
         self._append_log(message)
@@ -185,4 +189,4 @@ class StartupBootstrapDialog(QDialog):
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
         self._close_button.setEnabled(True)
-        self.reject()
+        self.completed.emit(False)

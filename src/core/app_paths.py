@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 
-APP_NAME = "PhotoManager"
+APP_NAME = "VisionMind"
 
 
 def get_project_root() -> Path:
@@ -18,7 +18,7 @@ def _default_base_dir() -> Path:
     frozen_root = getattr(sys, "_MEIPASS", None)
     if frozen_root:
         return Path(sys.executable).resolve().parent / "data"
-    return Path(__file__).resolve().parents[2]/ "data"
+    return Path(__file__).resolve().parents[2] / "data"
 
 
 def get_app_data_dir() -> Path:

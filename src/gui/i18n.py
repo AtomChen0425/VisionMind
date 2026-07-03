@@ -11,7 +11,7 @@ LANGUAGES = {
 
 TRANSLATIONS: dict[str, dict[str, Any]] = {
     "en": {
-        "title": "AI Gallery",
+        "title": "VisionMind",
         "people": "Photo",
         "group_title": "Libraries",
         "add": "Add",
@@ -90,7 +90,7 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
         "cancel": "Cancel",
     },
     "zh": {
-        "title": "AI 相册",
+        "title": "VisionMind",
         "people": "照片",
         "group_title": "分组",
         "add": "添加",
