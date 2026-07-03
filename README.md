@@ -1,4 +1,10 @@
-# VisionMind
+<div align="center">
+  <img src="./docs/icon.png" alt="VisionMind" width="200" />
+  <h1>VisionMind</h1>
+  <p><strong>Vector Search · Semantic Retrieval · AI Image Understanding · Automatic Tagging · Raw File Processing</strong></p>
+  <p>A local-first AI system for organizing, searching, and understanding your photo and video library.</p>
+</div>
+
 
 **VisionMind is a desktop AI photo library manager for Windows and macOS.**
 It scans large libraries incrementally, generates tags with `open-clip-torch`, stores semantic embeddings in a local FAISS vector database, and writes metadata in place with `ExifTool`.
@@ -180,4 +186,4 @@ No installer is required for normal use.
 
 ## License
 
-Add your license here if needed.
+MIT
