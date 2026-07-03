@@ -137,7 +137,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.logger = logging.getLogger(__name__)
-        self.setWindowTitle("PhotoManager")
+        self.setWindowTitle("VisionMind")
         self.resize(1600, 960)
 
         self.log_path = setup_logging()
@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
         self.db = DatabaseManager(get_database_path())
         self.scanner = Scanner(self.db)
 
-        self.settings = QSettings("PhotoManager", "PhotoManager")
+        self.settings = QSettings("VisionMind", "VisionMind")
         self.ui_language = normalize_language(self.settings.value("ui/language", "en", str))
         self.analyzer_model_name = self.settings.value("analyzer/model_name", "ViT-B-32", str)
         self.analyzer_pretrained = self.settings.value("analyzer/pretrained", "laion2b_s34b_b79k", str)
@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
 
         brand_row = QHBoxLayout()
         brand_row.setSpacing(10)
-        self.title_label = QLabel("AI Gallery")
+        self.title_label = QLabel("VisionMind")
         self.title_label.setObjectName("AppTitle")
         self.settings_btn = QPushButton("⚙")
         self.settings_btn.setObjectName("IconButton")
@@ -973,6 +973,8 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication([])
+    app.setApplicationName("VisionMind")
+    app.setOrganizationName("VisionMind")
     app.setWindowIcon(QIcon(str(get_resource_path("docs", "icon_256x256.ico"))))
     window = MainWindow()
     window.show()

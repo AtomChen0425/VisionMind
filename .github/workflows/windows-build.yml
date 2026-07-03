@@ -1,4 +1,4 @@
-name: Windows Build
+name: VisionMind Build
 
 on:
   push:
@@ -36,8 +36,8 @@ jobs:
           if (-not $version) {
             $version = "v0.0.0"
           }
-          $releaseName = "PhotoManager $version"
-          $zipName = "PhotoManager-$version-windows-$shortSha.zip"
+          $releaseName = "VisionMind $version"
+          $zipName = "VisionMind-$version-windows-$shortSha.zip"
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           "RELEASE_NAME=$releaseName" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -57,7 +57,7 @@ jobs:
             --clean `
             --windowed `
             --onedir `
-            --name PhotoManager `
+            --name VisionMind `
             --icon docs/icon_256x256.ico `
             --add-data "src/gui/style.qss;src/gui" `
             --add-data "docs/icon_256x256.ico;docs" `
@@ -75,7 +75,7 @@ jobs:
           if (Test-Path $zipPath) {
             Remove-Item $zipPath -Force
           }
-          Compress-Archive -Path "dist/PhotoManager/*" -DestinationPath $zipPath
+          Compress-Archive -Path "dist/VisionMind/*" -DestinationPath $zipPath
           "ZIP_PATH=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Update GitHub Release

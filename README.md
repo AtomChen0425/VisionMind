@@ -1,6 +1,6 @@
-# PhotoManager
+# VisionMind
 
-**PhotoManager is a desktop AI photo library manager for Windows and macOS.**
+**VisionMind is a desktop AI photo library manager for Windows and macOS.**
 It scans large libraries incrementally, generates tags with `open-clip-torch`, stores semantic embeddings in a local FAISS vector database, and writes metadata in place with `ExifTool`.
 
 ![Main window placeholder](docs/images/main-window.png)
@@ -20,7 +20,7 @@ It scans large libraries incrementally, generates tags with `open-clip-torch`, s
 
 ## What It Does
 
-PhotoManager combines four local layers into one desktop workflow:
+VisionMind combines four local layers into one desktop workflow:
 
 1. **Filesystem scanning**
    - Detects new, changed, and removed images incrementally.
@@ -76,7 +76,7 @@ Or use the packaged desktop build from GitHub Releases.
 
 ### 3. Let scanning run
 
-- PhotoManager monitors the library while the app stays open.
+- VisionMind monitors the library while the app stays open.
 - New files and modified files are picked up automatically.
 - Deleted libraries can be removed from the sidebar and stay removed after restart.
 
@@ -162,7 +162,7 @@ python scripts/download_exiftool.py
 
 ## Packaging
 
-Windows release builds are automated with GitHub Actions.
+VisionMind release builds are automated with GitHub Actions.
 Each release contains a portable Windows build:
 
 - download the ZIP from GitHub Releases
