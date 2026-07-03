@@ -2,8 +2,9 @@ name: VisionMind Build
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,6 +24,16 @@ jobs:
         with:
           python-version: "3.10"
           cache: pip
+
+      - name: Compute version
+        shell: powershell
+        run: |
+          $versionNumber = (git rev-list --count HEAD)
+          $version = "v0.0.$versionNumber"
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SHORT_SHA=$shortSha" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ZIP_NAME=VisionMind-$version-windows-$shortSha.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install dependencies
         shell: powershell
@@ -47,16 +58,16 @@ jobs:
             --collect-all open_clip `
             --collect-all huggingface_hub `
             --collect-all tqdm `
+            --collect-all faiss `
+            --collect-all rawpy `
+            --collect-all PIL `
             --hidden-import pyexiftool `
             src/gui/main.py
 
       - name: Package artifact
         shell: powershell
         run: |
-          $version = $env:GITHUB_REF_NAME
-          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
-          $zipName = "VisionMind-$version-windows-$shortSha.zip"
-          $zipPath = Join-Path "dist" $zipName
+          $zipPath = Join-Path "dist" $env:ZIP_NAME
           if (Test-Path $zipPath) {
             Remove-Item $zipPath -Force
           }
@@ -83,6 +94,16 @@ jobs:
           python-version: "3.10"
           cache: pip
 
+      - name: Compute version
+        shell: bash
+        run: |
+          VERSION_NUMBER="$(git rev-list --count HEAD)"
+          VERSION="v0.0.${VERSION_NUMBER}"
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          echo "APP_VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "SHORT_SHA=${SHORT_SHA}" >> "${GITHUB_ENV}"
+          echo "ZIP_NAME=VisionMind-${VERSION}-macos-${SHORT_SHA}.zip" >> "${GITHUB_ENV}"
+
       - name: Install dependencies
         shell: bash
         run: |
@@ -100,21 +121,22 @@ jobs:
             --onedir \
             --name VisionMind \
             --icon docs/icon.icns \
+            --osx-bundle-identifier com.visionmind.app \
             --add-data "src/gui/style.qss:src/gui" \
             --add-data "src/core/default_labels.md:src/core" \
             --add-data "docs/icon.icns:docs" \
             --collect-all open_clip \
             --collect-all huggingface_hub \
             --collect-all tqdm \
+            --collect-all faiss \
+            --collect-all rawpy \
+            --collect-all PIL \
             --hidden-import pyexiftool \
             src/gui/main.py
 
       - name: Package artifact
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          ZIP_NAME="VisionMind-${VERSION}-macos-${SHORT_SHA}.zip"
           ZIP_PATH="dist/${ZIP_NAME}"
           rm -f "${ZIP_PATH}"
           ditto -c -k --keepParent "dist/VisionMind.app" "${ZIP_PATH}"
@@ -132,6 +154,18 @@ jobs:
       - build-macos
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        shell: bash
+        run: |
+          VERSION_NUMBER="$(git rev-list --count HEAD)"
+          VERSION="v0.0.${VERSION_NUMBER}"
+          echo "APP_VERSION=${VERSION}" >> "${GITHUB_ENV}"
+
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
@@ -147,9 +181,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: VisionMind ${{ github.ref_name }}
-          body: Automated release for ${{ github.ref_name }}.
+          tag_name: ${{ env.APP_VERSION }}
+          name: VisionMind ${{ env.APP_VERSION }}
+          body: Automated release for ${{ env.APP_VERSION }}.
           files: |
             release-assets/windows/*.zip
             release-assets/macos/*.zip
