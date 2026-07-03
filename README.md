@@ -75,7 +75,7 @@ From source:
 python -m src
 ```
 
-Or use the packaged desktop build from GitHub Releases.
+Or use the packaged desktop build from [GitHub Releases](https://github.com/AtomChen0425/VisionMind/releases).
 
 ### 2. Add a library
 
