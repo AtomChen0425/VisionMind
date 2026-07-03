@@ -3,7 +3,7 @@
 **VisionMind is a desktop AI photo library manager for Windows and macOS.**
 It scans large libraries incrementally, generates tags with `open-clip-torch`, stores semantic embeddings in a local FAISS vector database, and writes metadata in place with `ExifTool`.
 
-![Main window placeholder](docs/images/main-window.png)
+![Main window](docs/images/main-window.png)
 
 ## Highlights
 
@@ -12,11 +12,13 @@ It scans large libraries incrementally, generates tags with `open-clip-torch`, s
 - **Desktop only**: no background service, no web server, no Docker.
 - **Incremental scan**: new and changed files are detected automatically while the app is open.
 - **In-place metadata updates**: tags are written directly into the image file metadata.
+- **Lightroom compatible**: keywords written by VisionMind can be detected and synced by Adobe Lightroom.
 - **GPU first**: OpenCLIP inference prefers GPU when available.
 - **Large library ready**: designed for 100,000+ photos with local SQLite state and cached thumbnails.
 
-![Multi-select placeholder](docs/images/multi-select.png)
-![Details panel placeholder](docs/images/detail-panel.png)
+![Multi-select](docs/images/multi-select.png)
+![Details panel](docs/images/detail-panel.png)
+![Lightroom keyword sync](docs/images/LightRoom_Keyword.png)
 
 ## What It Does
 
@@ -41,6 +43,7 @@ VisionMind combines four local layers into one desktop workflow:
    - Preserves existing tags.
    - Avoids duplicate tag injection.
    - Does not create sidecar copies.
+   - Writes keywords in a Lightroom-readable way so Adobe Lightroom can detect the change during metadata sync.
 
 ## Core Capabilities
 
@@ -53,8 +56,8 @@ VisionMind combines four local layers into one desktop workflow:
 - UI language switching
 - First-run bootstrap for AI model and ExifTool downloads
 
-![Search placeholder](docs/images/semantic-search.png)
-![Settings placeholder](docs/images/setting.png)
+![Search](docs/images/semantic-search.png)
+![Settings](docs/images/setting.png)
 
 ## How To Use
 
@@ -98,6 +101,7 @@ Or use the packaged desktop build from GitHub Releases.
 - AI-generated tags are written directly into supported image metadata.
 - Existing keywords are preserved.
 - Duplicate tags are ignored before writing.
+- Written tags can be recognized by Adobe Lightroom after metadata sync.
 
 ## First Run
 
