@@ -4,7 +4,7 @@ from pathlib import Path
 import logging
 import sys
 from PySide6.QtCore import QEvent, QItemSelectionModel, QModelIndex, QMimeData, QProcess, QSettings, Qt, QSize, QUrl, QPoint, QRect,QTimer
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QLinearGradient, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QMenu,
+    QSplashScreen,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -52,6 +53,43 @@ from src.gui.startup_bootstrap_dialog import StartupBootstrapDialog
 from src.gui.widgets import DetailsPanel, StatCard
 
 qss_path = get_resource_path("src", "gui", "style.qss")
+
+
+def _build_splash_pixmap() -> QPixmap:
+    pixmap = QPixmap(900, 520)
+    pixmap.fill(QColor("#f4f7fb"))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    gradient = QLinearGradient(0, 0, 900, 520)
+    gradient.setColorAt(0.0, QColor("#f8fbff"))
+    gradient.setColorAt(1.0, QColor("#eaf2ff"))
+    painter.fillRect(pixmap.rect(), gradient)
+
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#dce9fb"))
+    painter.drawEllipse(620, 40, 200, 200)
+    painter.setBrush(QColor("#cfe0f5"))
+    painter.drawEllipse(700, 220, 110, 110)
+    painter.setBrush(QColor("#2f73d9"))
+    painter.drawEllipse(90, 110, 110, 110)
+
+    painter.setPen(QColor("#172033"))
+    title_font = QFont("Segoe UI", 30, QFont.Bold)
+    painter.setFont(title_font)
+    painter.drawText(90, 250, "VisionMind")
+
+    painter.setPen(QColor("#5f7189"))
+    subtitle_font = QFont("Segoe UI", 13)
+    painter.setFont(subtitle_font)
+    painter.drawText(92, 292, "AI photo library manager")
+    painter.drawText(92, 320, "Scanning, tagging, and vector search are loading...")
+
+    painter.setPen(QColor("#8fa2ba"))
+    small_font = QFont("Segoe UI", 10)
+    painter.setFont(small_font)
+    painter.drawText(92, 372, "Preparing local cache, metadata tools, and the first library view.")
+    painter.end()
+    return pixmap
 
 
 class LibraryRowWidget(QWidget):
@@ -698,6 +736,7 @@ class MainWindow(QMainWindow):
                 model_cached,
                 exiftool_path is not None and Path(exiftool_path).exists(),
             )
+            self._set_status("Preparing startup resources...")
             dialog = StartupBootstrapDialog(
                 self.analyzer_model_name,
                 self.analyzer_pretrained,
@@ -705,16 +744,21 @@ class MainWindow(QMainWindow):
                 str(get_exiftool_dir()),
                 self,
             )
-            if not dialog.start():
-                QMessageBox.warning(
-                    self,
-                    self._ui_text("settings_title"),
-                    "Startup resources are not ready yet. The application will continue, but AI analysis and metadata writing may fail until downloads finish.",
-                )
-            self._refresh_exiftool_status()
+            self._startup_bootstrap_dialog = dialog
+            dialog.completed.connect(self._on_startup_bootstrap_completed)
+            dialog.start()
         except Exception as exc:
             self.logger.exception("Failed to bootstrap startup resources")
             QMessageBox.warning(self, self._ui_text("settings_title"), str(exc))
+
+    def _on_startup_bootstrap_completed(self, success: bool):
+        self._refresh_exiftool_status()
+        if success:
+            self._set_status("Startup resources are ready")
+            return
+        self._set_status(
+            "Startup resources are not ready yet. The application will continue, but AI analysis and metadata writing may fail until downloads finish."
+        )
 
     def _set_gallery_library_view(self):
         if self.library_id is None:
@@ -976,8 +1020,15 @@ def main():
     app.setApplicationName("VisionMind")
     app.setOrganizationName("VisionMind")
     app.setWindowIcon(QIcon(str(get_resource_path("docs", "icon_256x256.ico"))))
+    splash = QSplashScreen(_build_splash_pixmap())
+    splash.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+    splash.show()
+    app.processEvents()
     window = MainWindow()
+    splash.showMessage("Loading interface...", Qt.AlignBottom | Qt.AlignHCenter, QColor("#5f7189"))
+    app.processEvents()
     window.show()
+    splash.finish(window)
     QTimer.singleShot(0, window._bootstrap_open_clip_model)
     app.exec()
 
