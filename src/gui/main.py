@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
         self._bind_signals()
         self._apply_style()
         self._apply_language()
+        self._refresh_model_cache_status()
         self._refresh_exiftool_status()
         self.controller.refresh_libraries()
 
@@ -308,6 +309,12 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Idle")
         self.status_label.setObjectName("StatusLabel")
         self.status_label.setWordWrap(True)
+        self.model_cache_status_label = QLabel("OpenCLIP: checking...")
+        self.model_cache_status_label.setObjectName("ModelCacheStatusTag")
+        self.model_cache_status_label.setWordWrap(True)
+        self.model_cache_path_label = QLabel("-")
+        self.model_cache_path_label.setObjectName("ModelCachePathTag")
+        self.model_cache_path_label.setWordWrap(True)
         self.exiftool_status_label = QLabel("ExifTool: checking...")
         self.exiftool_status_label.setObjectName("ExifToolStatusTag")
         self.exiftool_status_label.setWordWrap(True)
@@ -315,6 +322,8 @@ class MainWindow(QMainWindow):
         self.exiftool_path_label.setObjectName("ExifToolPathTag")
         self.exiftool_path_label.setWordWrap(True)
         footer_layout.addWidget(self.status_label)
+        footer_layout.addWidget(self.model_cache_status_label)
+        footer_layout.addWidget(self.model_cache_path_label)
         footer_layout.addWidget(self.exiftool_status_label)
         footer_layout.addWidget(self.exiftool_path_label)
         left_layout.addWidget(sidebar_footer)
@@ -502,6 +511,18 @@ class MainWindow(QMainWindow):
         self.search_service = SemanticSearchService(self.db, self.analysis_service, self.vector_index)
         self.pipeline = PhotoProcessingPipeline(self.db, self.analysis_service, ExifToolTagWriter(), self.vector_index)
         self.controller.pipeline = self.pipeline
+        self._refresh_model_cache_status()
+
+    def _refresh_model_cache_status(self):
+        model_root = getattr(self.analyzer, "model_cache_root", None)
+        if model_root is None:
+            self.model_cache_status_label.setText("OpenCLIP: not ready")
+            self.model_cache_path_label.setText("Model cache: -")
+            return
+        resolved_path = str(Path(model_root).resolve())
+        self.model_cache_status_label.setText("OpenCLIP: ready")
+        self.model_cache_path_label.setText(f"Model cache: {resolved_path}")
+
     def _on_gallery_data_changed(self, topLeft, bottomRight, roles):
         if not roles or Qt.DecorationRole in roles:
             self._layout_reflow_timer.start()  
@@ -752,6 +773,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self._ui_text("settings_title"), str(exc))
 
     def _on_startup_bootstrap_completed(self, success: bool):
+        self._refresh_model_cache_status()
         self._refresh_exiftool_status()
         if success:
             self._set_status("Startup resources are ready")
