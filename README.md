@@ -9,7 +9,11 @@
 **VisionMind is a desktop AI photo library manager for Windows and macOS.**
 It scans large libraries incrementally, generates tags with `open-clip-torch`, stores semantic embeddings in a local FAISS vector database, and writes metadata in place with `ExifTool`.
 
-![Main window](docs/images/main-window.png)
+[▶ Watch Demo](docs/Vision-Mind1.mp4)
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/4ae1216e-3572-4164-99ae-136dea18ffd0" width="600" controls></video>
+</div>
 
 ## Highlights
 
