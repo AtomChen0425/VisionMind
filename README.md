@@ -192,6 +192,9 @@ No installer is required for normal use.
 
 - [`.github/workflows/windows-build.yml`](.github/workflows/windows-build.yml)
 
+## Community Support
+
+Codux recognizes and supports the [LINUX DO](https://linux.do) community.
 
 ## License
 
