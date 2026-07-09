@@ -133,8 +133,8 @@ jobs:
             --collect-all faiss \
             --collect-all rawpy \
             --collect-all PIL \
-            --collect-all transformers `
-            --collect-all tokenizers `
+            --collect-all transformers \
+            --collect-all tokenizers \
             --hidden-import pyexiftool \
             src/gui/main.py
 
