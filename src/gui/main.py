@@ -185,8 +185,8 @@ class MainWindow(QMainWindow):
 
         self.settings = QSettings("VisionMind", "VisionMind")
         self.ui_language = normalize_language(self.settings.value("ui/language", "en", str))
-        self.analyzer_model_name = self.settings.value("analyzer/model_name", "ViT-B-32", str)
-        self.analyzer_pretrained = self.settings.value("analyzer/pretrained", "laion2b_s34b_b79k", str)
+        self.analyzer_model_name = self.settings.value("analyzer/model_name", "xlm-roberta-base-ViT-B-32", str)
+        self.analyzer_pretrained = self.settings.value("analyzer/pretrained", "laion5b_s13b_b90k", str)
         self.analyzer_probability_threshold = float(self.settings.value("analyzer/probability_threshold", 0.2))
 
         self.analyzer = OpenClipAnalyzer(

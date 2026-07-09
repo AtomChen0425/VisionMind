@@ -81,10 +81,10 @@ class SettingsDialog(QDialog):
         self.threshold_spin.setValue(float(settings.probability_threshold))
 
         self.model_name_edit = QLineEdit(settings.model_name)
-        self.model_name_edit.setPlaceholderText("ViT-B-32")
+        self.model_name_edit.setPlaceholderText("xlm-roberta-base-ViT-B-32")
 
         self.pretrained_edit = QLineEdit(settings.pretrained)
-        self.pretrained_edit.setPlaceholderText("laion2b_s34b_b79k")
+        self.pretrained_edit.setPlaceholderText("laion5b_s13b_b90k")
 
         self.language_combo = QComboBox()
         for code, name in available_languages():
@@ -135,7 +135,7 @@ class SettingsDialog(QDialog):
     def values(self) -> AppSettings:
         return AppSettings(
             probability_threshold=float(self.threshold_spin.value()),
-            model_name=self.model_name_edit.text().strip() or "ViT-B-32",
-            pretrained=self.pretrained_edit.text().strip() or "laion2b_s34b_b79k",
+            model_name=self.model_name_edit.text().strip() or "xlm-roberta-base-ViT-B-32",
+            pretrained=self.pretrained_edit.text().strip() or "laion5b_s13b_b90k",
             language=str(self.language_combo.currentData()),
         )
