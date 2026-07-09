@@ -6,3 +6,5 @@ numpy
 rawpy
 pyexiftool
 faiss-cpu
+transformers
+sentencepiece
