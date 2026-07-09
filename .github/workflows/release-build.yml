@@ -57,6 +57,8 @@ jobs:
             --add-data "src/core/default_labels.md;src/core" `
             --collect-all open_clip `
             --collect-all huggingface_hub `
+            --collect-all transformers `
+            --collect-all tokenizers `
             --collect-all tqdm `
             --collect-all faiss `
             --collect-all rawpy `
@@ -131,6 +133,8 @@ jobs:
             --collect-all faiss \
             --collect-all rawpy \
             --collect-all PIL \
+            --collect-all transformers `
+            --collect-all tokenizers `
             --hidden-import pyexiftool \
             src/gui/main.py
 
