@@ -33,8 +33,8 @@ class OpenClipAnalyzer:
     def __init__(
         self,
         *,
-        model_name: str = "ViT-B-32",
-        pretrained: str = "laion2b_s34b_b79k",
+        model_name: str = "xlm-roberta-base-ViT-B-32",
+        pretrained: str = "laion5b_s13b_b90k",
         probability_threshold: float = PROTABILITY_THRESHOLD,
         device: str | None = None,
     ):
